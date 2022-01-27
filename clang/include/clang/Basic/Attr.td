@@ -621,6 +621,12 @@ class IgnoredAttr : Attr {
 // Attributes begin here
 //
 
+def Secret : InheritableAttr {
+  let Spellings = [GCC<"secret">];
+  let Subjects = SubjectList<[Function, Var]>;
+  let Documentation = [Undocumented];
+}
+
 def AbiTag : Attr {
   let Spellings = [GCC<"abi_tag", /*AllowInC*/0>];
   let Args = [VariadicStringArgument<"Tags">];

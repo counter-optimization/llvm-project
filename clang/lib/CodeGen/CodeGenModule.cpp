@@ -1849,6 +1849,9 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
       B.addAttribute(llvm::Attribute::StackProtectReq);
   }
 
+  if (D->hasAttr<SecretAttr>())
+    B.addAttribute(llvm::Attribute::Secret);
+
   if (!D) {
     // If we don't have a declaration to control inlining, the function isn't
     // explicitly marked as alwaysinline for semantic reasons, and inlining is

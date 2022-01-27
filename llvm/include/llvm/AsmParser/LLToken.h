@@ -229,6 +229,7 @@ enum Kind {
   kw_readonly,
   kw_returned,
   kw_returns_twice,
+  kw_secret,
   kw_signext,
   kw_speculatable,
   kw_ssp,

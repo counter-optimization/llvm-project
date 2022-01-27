@@ -31,6 +31,16 @@ namespace {
       ++HelloCounter;
       errs() << "Hello: ";
       errs().write_escaped(F.getName()) << '\n';
+
+      size_t num_args = F.arg_size();
+      if (num_args > 0) {
+        errs() << "num args: " << num_args << '\n';
+        bool hasSecretParam = false;
+        for (size_t argno = 0; argno < num_args; argno++) {
+          hasSecretParam |= F.hasParamAttribute(argno, Attribute::Secret);
+        }
+        errs() << "hasSecretParam?: " << hasSecretParam << "\n\n";
+      }
       return false;
     }
   };
