@@ -2598,6 +2598,11 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
   if (D.hasAttr<AnnotateAttr>())
     EmitVarAnnotations(&D, DeclPtr.getPointer());
 
+  if (D.hasAttr<SecretAttr>()){
+    llvm::Argument *LLVMArg = dyn_cast<llvm::Argument>(Arg.getAnyValue());
+    LLVMArg->addAttr(llvm::Attribute::Secret);
+  }
+
   // We can only check return value nullability if all arguments to the
   // function satisfy their nullability preconditions. This makes it necessary
   // to emit null checks for args in the function body itself.

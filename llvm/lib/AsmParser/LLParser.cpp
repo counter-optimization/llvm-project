@@ -1644,6 +1644,9 @@ bool LLParser::parseOptionalParamOrReturnAttrs(AttrBuilder &B, bool IsParam) {
     if (Attr == Attribute::None)
       return HaveError;
 
+    if (Attr == Attribute::Secret)
+      B.addAttribute(Attribute::Secret);
+
     if (parseEnumAttribute(Attr, B, /* InAttrGroup */ false))
       return true;
 

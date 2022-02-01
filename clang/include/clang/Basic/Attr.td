@@ -621,9 +621,9 @@ class IgnoredAttr : Attr {
 // Attributes begin here
 //
 
-def Secret : InheritableAttr {
-  let Spellings = [GCC<"secret">];
-  let Subjects = SubjectList<[Function, Var]>;
+def Secret : InheritableParamAttr {
+  let Spellings = [GNU<"secret">];
+  let Subjects = SubjectList<[Function, Var, Field, ParmVar]>;
   let Documentation = [Undocumented];
 }
 

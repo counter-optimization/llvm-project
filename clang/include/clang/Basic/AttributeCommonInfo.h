@@ -14,6 +14,7 @@
 #ifndef LLVM_CLANG_BASIC_ATTRIBUTECOMMONINFO_H
 #define LLVM_CLANG_BASIC_ATTRIBUTECOMMONINFO_H
 #include "clang/Basic/SourceLocation.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace clang {
 class IdentifierInfo;

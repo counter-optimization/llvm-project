@@ -8121,16 +8121,6 @@ EnforceTCBLeafAttr *Sema::mergeEnforceTCBLeafAttr(
 //===----------------------------------------------------------------------===//
 // Top Level Sema Entry Points
 //===----------------------------------------------------------------------===//
-
-static void handleSecretAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
-  D->addAttr(::new (S.Context)
-             // SecretAttr(AL.getRange(),
-             SecretAttr(S.Context, AL.getRange()));
-
-                        // AL.getAttributeSpellingListIndex()));
-}
-
-
 /// ProcessDeclAttribute - Apply the specific attribute to the specified decl if
 /// the attribute applies to decls.  If the attribute is a type attribute, just
 /// silently ignore it if a GNU attribute.
@@ -8788,7 +8778,7 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
 
   case ParsedAttr::AT_Secret:
-    handleSecretAttr(S, D, AL);
+    handleSimpleAttribute<SecretAttr>(S, D, AL);
     break;
   }
 }
