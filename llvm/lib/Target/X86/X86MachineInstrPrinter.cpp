@@ -34,14 +34,21 @@ bool X86MachineInstrPrinter::runOnMachineFunction(MachineFunction &MF) {
     // get the LLVM IR function which will be used for finding the vars
     // marked by llvm.var.annotate intrinsic
     const Function& F = MF.getFunction();
+    const MachineRegisterInfo& MRI = MF.getRegInfo();
+    const TargetRegisterInfo *TRI = MRI.getTargetRegisterInfo();
 
     for (MachineBasicBlock &MBB : MF) {
         errs() << "MF is: " << MF.getName() << '\n';
 
         // Live Ins printing
         errs() << "liveins are: ";
-        for (const auto &regPair : MF.getRegInfo().liveins()) {
-            errs() << std::get<0>(regPair) << "," << std::get<1>(regPair) << "; ";
+        for (const auto &RegPair : MRI.liveins()) {
+            MCRegister MCR;
+            Register Reg;
+            std::tie(MCR, Reg) = RegPair;
+
+            errs() << MCR << "," << Reg << '|';
+            errs() << TRI->getRegAsmName(MCR) << ",";
         }
         errs() << '\n';
 
@@ -49,6 +56,10 @@ bool X86MachineInstrPrinter::runOnMachineFunction(MachineFunction &MF) {
         for (MachineInstr &MI : MBB) {
             if (MI.mayStore()) {
                 errs() << "\tstore instr is: " << MI;
+                for (auto RMP : MBB.liveins()) {
+                    errs() << "\tcurrent MBB liveins:\n";
+                    errs() << "\t\t" << RMP.PhysReg << '\n'; // << ", " << RMP.LaneMask 
+                }
             }
         }
     }
