@@ -184,6 +184,7 @@ void initializeGlobalOptLegacyPassPass(PassRegistry&);
 void initializeGlobalSplitPass(PassRegistry&);
 void initializeGlobalsAAWrapperPassPass(PassRegistry&);
 void initializeGuardWideningLegacyPassPass(PassRegistry&);
+void initializeHandlesSecretsPass(PassRegistry&);
 void initializeHardwareLoopsPass(PassRegistry&);
 void initializeMIRProfileLoaderPassPass(PassRegistry &);
 void initializeMemProfilerLegacyPassPass(PassRegistry &);

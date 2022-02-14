@@ -2918,7 +2918,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   DebugVars = &getAnalysis<LiveDebugVariables>();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
 
-  initializeCSRCost();
+  initializeCSRCost();  
 
   RegCosts = TRI->getRegisterCosts(*MF);
 

@@ -35,7 +35,7 @@ bool X86MachineInstrPrinter::runOnMachineFunction(MachineFunction &MF) {
     // marked by llvm.var.annotate intrinsic
     const Function& F = MF.getFunction();
     const MachineRegisterInfo& MRI = MF.getRegInfo();
-    const TargetRegisterInfo *TRI = MRI.getTargetRegisterInfo();
+    const TargetRegisterInfo* TRI = MRI.getTargetRegisterInfo();
 
     for (MachineBasicBlock &MBB : MF) {
         errs() << "MF is: " << MF.getName() << '\n';
@@ -56,10 +56,6 @@ bool X86MachineInstrPrinter::runOnMachineFunction(MachineFunction &MF) {
         for (MachineInstr &MI : MBB) {
             if (MI.mayStore()) {
                 errs() << "\tstore instr is: " << MI;
-                for (auto RMP : MBB.liveins()) {
-                    errs() << "\tcurrent MBB liveins:\n";
-                    errs() << "\t\t" << RMP.PhysReg << '\n'; // << ", " << RMP.LaneMask 
-                }
             }
         }
     }

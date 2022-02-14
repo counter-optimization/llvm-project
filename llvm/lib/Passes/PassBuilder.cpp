@@ -39,6 +39,7 @@
 #include "llvm/Analysis/DominanceFrontier.h"
 #include "llvm/Analysis/FunctionPropertiesAnalysis.h"
 #include "llvm/Analysis/GlobalsModRef.h"
+#include "llvm/Analysis/HandlesSecrets.h"
 #include "llvm/Analysis/IRSimilarityIdentifier.h"
 #include "llvm/Analysis/IVUsers.h"
 #include "llvm/Analysis/InlineAdvisor.h"
