@@ -11,6 +11,12 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/InitializePasses.h"
 
+using namespace llvm;
+
+INITIALIZE_PASS(HandlesSecretsWrapperPass, "hs",
+            "Results for whether the function operates on variables marked secret",
+            false, true)
+
 namespace llvm {
 
 AnalysisKey HandlesSecrets::Key;
@@ -23,6 +29,7 @@ AnalysisKey HandlesSecrets::Key;
 // __attribute__((annotation("secret"))).
 // The LLVM IR would look something like this:
 StringRef HandlesSecrets::run(Function &F, FunctionAnalysisManager &AM) {
+    StringRef SecretLabel("secret");
     for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
         if (auto *CallInsn = dyn_cast<CallBase>(&*I)) {
             if (auto *CalledFunction = CallInsn->getCalledFunction()) {
@@ -42,7 +49,7 @@ StringRef HandlesSecrets::run(Function &F, FunctionAnalysisManager &AM) {
                                         dyn_cast<ConstantDataSequential>(annoteStr->getInitializer())) {
                                     if (data->isString()) {
                                         StringRef AnnotationLabel = data->getAsString();
-                                        if (AnnotationLabel == "secret") {
+                                        if (AnnotationLabel.startswith(SecretLabel)) {
                                             return "true";
                                         }
                                     }
@@ -62,5 +69,52 @@ PreservedAnalyses HandlesSecretsPass::run(Function &F, FunctionAnalysisManager &
     OS << FAM.getResult<HandlesSecrets>(F) << '\n';
     return PreservedAnalyses::all();
 }
+
+HandlesSecretsWrapperPass::HandlesSecretsWrapperPass() : FunctionPass(ID) {
+    initializeHandlesSecretsWrapperPassPass(*PassRegistry::getPassRegistry());
+}
+
+void HandlesSecretsWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
+    AU.setPreservesAll();
+}
+
+bool HandlesSecretsWrapperPass::runOnFunction(Function &F) {
+    StringRef SecretLabel("secret");
+    for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
+        if (auto *CallInsn = dyn_cast<CallBase>(&*I)) {
+            if (auto *CalledFunction = CallInsn->getCalledFunction()) {
+                if (CalledFunction->isIntrinsic() && CalledFunction->getName() == "llvm.var.annotation") {
+                    // At this point, means that we've found an annotation attribute, the rest of this nesting
+                    // checks that the annotation attribute is a "secret" annotation attribute courtesy of
+                    // https://stackoverflow.com/questions/46206777/identify-annotated-variable-in-an-llvm-pass
+                    // The llvm.var.annotation intrinsic has three args: ptr to the variable being annotated,
+                    // pointer to the global string annotation, and a pointer to the global filename corresponding
+                    // to the llvm ir module 
+                    ConstantExpr *ce = cast<ConstantExpr>(CallInsn->getOperand(1));
+                    if (ce) {
+                        if (ce->getOpcode() == Instruction::GetElementPtr) {
+                            if (GlobalVariable *annoteStr =
+                                dyn_cast<GlobalVariable>(ce->getOperand(0))) {
+                                if (ConstantDataSequential *data =
+                                        dyn_cast<ConstantDataSequential>(annoteStr->getInitializer())) {
+                                    if (data->isString()) {
+                                        StringRef AnnotationLabel = data->getAsString();
+                                        if (AnnotationLabel.startswith(SecretLabel)) {
+                                            FunctionHandlesSecrets = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    FunctionHandlesSecrets = false;
+    return false; // Doesn't change IR
+}
+
+char HandlesSecretsWrapperPass::ID = 0;
 
 } // end namespace llvm

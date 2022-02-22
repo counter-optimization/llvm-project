@@ -10,6 +10,7 @@
 
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
+#include "llvm/Analysis/HandlesSecrets.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Pass.h"
@@ -52,6 +53,7 @@ public:
     FPM->add(createScopedNoAliasAAWrapperPass());
     FPM->add(createTypeBasedAAWrapperPass());
     FPM->add(createAAResultsWrapperPass());
+    FPM->add(createHandlesSecretsWrapperPass());
 
     // TODO: These are non-conditional passes that run between
     // EP_ModuleOptimizerEarly and EP_VectorizerStart just to ensure we do not

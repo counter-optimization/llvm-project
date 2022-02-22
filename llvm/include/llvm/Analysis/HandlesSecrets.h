@@ -22,6 +22,28 @@ public:
     Result run(Function &F, FunctionAnalysisManager &AM);
 }; // end class HandlesSecrets
 
+class HandlesSecretsWrapperPass : public FunctionPass {
+    bool FunctionHandlesSecrets = false;
+
+public:
+    static char ID;
+
+    HandlesSecretsWrapperPass();
+    ~HandlesSecretsWrapperPass() = default;
+
+    bool getAnalysisResults() const {
+        return FunctionHandlesSecrets;
+    }
+    bool runOnFunction(Function &F) override;
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+};
+
+void initializeHandlesSecretsWrapperPassPass(PassRegistry &);
+
+// FunctionPass *createHandlesSecretsWrapperPass() {
+//     return new HandlesSecretsWrapperPass();
+// }
+
 class HandlesSecretsPass : public AnalysisInfoMixin<HandlesSecretsPass> {
     raw_ostream &OS;
 public:

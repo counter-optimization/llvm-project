@@ -30,6 +30,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/HandlesSecrets.h"
 #include "llvm/CodeGen/CalcSpillWeights.h"
 #include "llvm/CodeGen/EdgeBundles.h"
 #include "llvm/CodeGen/LiveInterval.h"
@@ -182,6 +183,7 @@ private:
   SpillPlacement *SpillPlacer;
   LiveDebugVariables *DebugVars;
   AliasAnalysis *AA;
+  bool FunctionHandlesSecrets;
 
   // state
   std::unique_ptr<Spiller> SpillerInstance;
