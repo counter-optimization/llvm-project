@@ -17,6 +17,17 @@ INITIALIZE_PASS(HandlesSecretsWrapperPass, "hs",
             "Results for whether the function operates on variables marked secret",
             false, true)
 
+INITIALIZE_PASS_BEGIN(HandlesSecretsModulePass, "hsm",
+            "Results for whether the function operates on variables marked secret",
+            false, true)
+INITIALIZE_PASS_DEPENDENCY(HandlesSecretsWrapperPass)
+INITIALIZE_PASS_END(HandlesSecretsModulePass, "hsm",
+            "Results for whether the function operates on variables marked secret",
+            false, true)
+
+INITIALIZE_PASS(X86_64SilentStoreMitigationPass, "ss",
+                "Mitigations for silent store optimizations", true, true)
+
 namespace llvm {
 
 AnalysisKey HandlesSecrets::Key;
@@ -84,6 +95,7 @@ bool HandlesSecretsWrapperPass::runOnFunction(Function &F) {
         if (auto *CallInsn = dyn_cast<CallBase>(&*I)) {
             if (auto *CalledFunction = CallInsn->getCalledFunction()) {
                 if (CalledFunction->isIntrinsic() && CalledFunction->getName() == "llvm.var.annotation") {
+                    FunctionHandlesSecrets = true;
                     // At this point, means that we've found an annotation attribute, the rest of this nesting
                     // checks that the annotation attribute is a "secret" annotation attribute courtesy of
                     // https://stackoverflow.com/questions/46206777/identify-annotated-variable-in-an-llvm-pass
@@ -115,6 +127,45 @@ bool HandlesSecretsWrapperPass::runOnFunction(Function &F) {
     return false; // Doesn't change IR
 }
 
+bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) {
+    if (!shouldRunOnMachineFunction(MF)) {
+        return false;
+    }
+
+    for (auto& MBB : MF) {
+        for (auto& MI : MBB) {
+            if (MI.mayStore()) {
+                errs() << "Function " << MF.getName() << " instr " << MI;
+                errs() << " may store.";
+
+                // i.e., this isn't just `push rbp`
+                if (!MI.getFlag(MachineInstr::MIFlag::FrameSetup)) {
+                    errs() << "MI has " << MI.getNumOperands() << " operands\n";
+                    const auto& OP0 = MI.getOperand(0);
+                    for (auto& OP : MI.operands()) {
+                        errs() << "\t\tOperand: " << OP << '\n';
+                    }
+                }
+            }
+        }
+        errs() << MBB << '\n';
+    }
+
+    return true;
+}
+
+// This will eventually check for the secret attribute. For now, just use function names.
+bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(MachineFunction& MF) {
+    StringRef TargetFunctionName{"fix_convert_from_int64"};
+    return MF.getName().contains(TargetFunctionName);
+}
+
+char X86_64SilentStoreMitigationPass::ID = 0;
 char HandlesSecretsWrapperPass::ID = 0;
+char HandlesSecretsModulePass::ID = 0;
+
+FunctionPass* createX86_64SilentStoreMitigationPass() {
+    return new X86_64SilentStoreMitigationPass();
+}
 
 } // end namespace llvm

@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/Analysis/HandlesSecrets.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DataLayout.h"
@@ -90,7 +91,8 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   initializeX86OptimizeLEAPassPass(PR);
   initializeX86PartialReductionPass(PR);
   initializePseudoProbeInserterPass(PR);
-  initializeX86MachineInstrPrinterPass(PR);
+  initializeX86_64SilentStoreMitigationPassPass(PR);
+  // initializeX86MachineInstrPrinterPass(PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -602,7 +604,8 @@ void X86PassConfig::addPreEmitPass2() {
              M->getFunction("objc_unsafeClaimAutoreleasedReturnValue");
     }));
 
-  addPass(createX86MachineInstrPrinterPass());
+  addPass(createX86_64SilentStoreMitigationPass());
+  // addPass(createX86MachineInstrPrinterPass());
 }
 
 bool X86PassConfig::addPostFastRegAllocRewrite() {

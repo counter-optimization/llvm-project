@@ -156,7 +156,7 @@ INITIALIZE_PASS_DEPENDENCY(EdgeBundles)
 INITIALIZE_PASS_DEPENDENCY(SpillPlacement)
 INITIALIZE_PASS_DEPENDENCY(MachineOptimizationRemarkEmitterPass)
 INITIALIZE_PASS_DEPENDENCY(RegAllocEvictionAdvisorAnalysis)
-INITIALIZE_PASS_DEPENDENCY(HandlesSecretsWrapperPass)
+// INITIALIZE_PASS_DEPENDENCY(HandlesSecretsModulePass)
 INITIALIZE_PASS_END(RAGreedy, "greedy",
                 "Greedy Register Allocator", false, false)
 
@@ -224,8 +224,8 @@ void RAGreedy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<SpillPlacement>();
   AU.addRequired<MachineOptimizationRemarkEmitterPass>();
   AU.addRequired<RegAllocEvictionAdvisorAnalysis>();
-  AU.addRequired<HandlesSecretsWrapperPass>();
-  AU.addPreserved<HandlesSecretsWrapperPass>();
+  // AU.addRequired<HandlesSecretsModulePass>();
+  // AU.addPreserved<HandlesSecretsModulePass>();
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
@@ -2921,10 +2921,11 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SpillPlacer = &getAnalysis<SpillPlacement>();
   DebugVars = &getAnalysis<LiveDebugVariables>();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
-  FunctionHandlesSecrets = getAnalysis<HandlesSecretsWrapperPass>().getAnalysisResults();
+  // errs() << "In RegAllocGreedy, getting results of hs module pass\n";
+  // HS = &getAnalysis<HandlesSecretsModulePass>();
 
-  errs() << "In RegAllocGreedy, Function " << MF->getName() << " handles secrets?: ";
-  errs() << FunctionHandlesSecrets << '\n';
+  // errs() << "In RegAllocGreedy, Function " << MF->getName() << " handles secrets?: ";
+  // errs() << HS->functionHandlesSecrets(MF->getFunction()) << '\n';
 
   initializeCSRCost();  
 

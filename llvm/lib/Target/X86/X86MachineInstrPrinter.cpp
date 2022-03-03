@@ -4,84 +4,86 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 /* #include "llvm/Target/TargetRegisterInfo.h" */
 
-using namespace llvm;
+// using namespace llvm;
 
-#define X86_MACHINEINSTR_PRINTER_PASS_NAME "Dummy X86 machineinstr printer pass"
+// initializeX86MachineInstrPrinterPass
 
-namespace {
+// #define X86_MACHINEINSTR_PRINTER_PASS_NAME "Dummy X86 machineinstr printer pass"
 
-class X86MachineInstrPrinter : public MachineFunctionPass {
-public:
-    static char ID;
+// namespace {
 
-    X86MachineInstrPrinter() : MachineFunctionPass(ID) {
-        initializeX86MachineInstrPrinterPass(*PassRegistry::getPassRegistry());
-    }
+// class X86MachineInstrPrinter : public MachineFunctionPass {
+// public:
+//     static char ID;
 
-    bool runOnMachineFunction(MachineFunction &MF) override;
-    void getAnalysisUsage(AnalysisUsage &AU) const override;
+//     X86MachineInstrPrinter() : MachineFunctionPass(ID) {
+//         initializeX86MachineInstrPrinterPass(*PassRegistry::getPassRegistry());
+//     }
 
-    StringRef getPassName() const override { 
-        return X86_MACHINEINSTR_PRINTER_PASS_NAME; 
-    }
-private:
-    std::vector<MCRegister> getTaintedLiveIns(const MachineFunction &MF, const Function &F) const;
-};
+//     bool runOnMachineFunction(MachineFunction &MF) override;
+//     void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-char X86MachineInstrPrinter::ID = 0;
+//     StringRef getPassName() const override { 
+//         return X86_MACHINEINSTR_PRINTER_PASS_NAME; 
+//     }
+// private:
+//     std::vector<MCRegister> getTaintedLiveIns(const MachineFunction &MF, const Function &F) const;
+// };
 
-bool X86MachineInstrPrinter::runOnMachineFunction(MachineFunction &MF) {
-    // get the LLVM IR function which will be used for finding the vars
-    // marked by llvm.var.annotate intrinsic
-    const Function& F = MF.getFunction();
-    const MachineRegisterInfo& MRI = MF.getRegInfo();
-    const TargetRegisterInfo* TRI = MRI.getTargetRegisterInfo();
+// char X86MachineInstrPrinter::ID = 0;
 
-    for (MachineBasicBlock &MBB : MF) {
-        errs() << "MF is: " << MF.getName() << '\n';
+// bool X86MachineInstrPrinter::runOnMachineFunction(MachineFunction &MF) {
+//     // get the LLVM IR function which will be used for finding the vars
+//     // marked by llvm.var.annotate intrinsic
+//     const Function& F = MF.getFunction();
+//     const MachineRegisterInfo& MRI = MF.getRegInfo();
+//     const TargetRegisterInfo* TRI = MRI.getTargetRegisterInfo();
 
-        // Live Ins printing
-        errs() << "liveins are: ";
-        for (const auto &RegPair : MRI.liveins()) {
-            MCRegister MCR;
-            Register Reg;
-            std::tie(MCR, Reg) = RegPair;
+//     for (MachineBasicBlock &MBB : MF) {
+//         errs() << "MF is: " << MF.getName() << '\n';
 
-            errs() << MCR << "," << Reg << '|';
-            errs() << TRI->getRegAsmName(MCR) << ",";
-        }
-        errs() << '\n';
+//         // Live Ins printing
+//         errs() << "liveins are: ";
+//         for (const auto &RegPair : MRI.liveins()) {
+//             MCRegister MCR;
+//             Register Reg;
+//             std::tie(MCR, Reg) = RegPair;
 
-        // Process store instructions
-        for (MachineInstr &MI : MBB) {
-            if (MI.mayStore()) {
-                errs() << "\tstore instr is: " << MI;
-            }
-        }
-    }
+//             errs() << MCR << "," << Reg << '|';
+//             errs() << TRI->getRegAsmName(MCR) << ",";
+//         }
+//         errs() << '\n';
 
-    return false;
-}
+//         // Process store instructions
+//         for (MachineInstr &MI : MBB) {
+//             if (MI.mayStore()) {
+//                 errs() << "\tstore instr is: " << MI;
+//             }
+//         }
+//     }
 
-std::vector<MCRegister> X86MachineInstrPrinter::getTaintedLiveIns(
-        const MachineFunction &MF, const Function &F) const {
-    std::vector<MCRegister> taintedLiveIns;
-    return taintedLiveIns;
-}
+//     return false;
+// }
 
-void X86MachineInstrPrinter::getAnalysisUsage(AnalysisUsage &AU) const {
-    MachineFunctionPass::getAnalysisUsage(AU);
-    AU.setPreservesCFG();
-}
+// std::vector<MCRegister> X86MachineInstrPrinter::getTaintedLiveIns(
+//         const MachineFunction &MF, const Function &F) const {
+//     std::vector<MCRegister> taintedLiveIns;
+//     return taintedLiveIns;
+// }
 
-} // end of anonymous namespace
+// void X86MachineInstrPrinter::getAnalysisUsage(AnalysisUsage &AU) const {
+//     MachineFunctionPass::getAnalysisUsage(AU);
+//     AU.setPreservesCFG();
+// }
 
-INITIALIZE_PASS(X86MachineInstrPrinter, "x86-machineinstr-printer",
-    X86_MACHINEINSTR_PRINTER_PASS_NAME,
-    true, // is CFG only?
-    true  // is analysis?
-)
+// } // end of anonymous namespace
 
-FunctionPass* llvm::createX86MachineInstrPrinterPass() { 
-    return new X86MachineInstrPrinter(); 
-}
+// INITIALIZE_PASS(X86MachineInstrPrinter, "x86-machineinstr-printer",
+//     X86_MACHINEINSTR_PRINTER_PASS_NAME,
+//     true, // is CFG only?
+//     true  // is analysis?
+// )
+
+// FunctionPass* llvm::createX86MachineInstrPrinterPass() { 
+//     return new X86MachineInstrPrinter(); 
+// }

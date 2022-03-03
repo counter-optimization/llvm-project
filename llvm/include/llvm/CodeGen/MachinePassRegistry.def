@@ -48,6 +48,7 @@ FUNCTION_PASS("expandvp", ExpandVectorPredicationPass, ())
 FUNCTION_PASS("lowerinvoke", LowerInvokePass, ())
 FUNCTION_PASS("scalarize-masked-mem-intrin", ScalarizeMaskedMemIntrinPass, ())
 FUNCTION_PASS("verify", VerifierPass, ())
+FUNCTION_PASS("silent-stores", X86_64SilentStoreMitigationPass, ())
 #undef FUNCTION_PASS
 
 #ifndef LOOP_PASS
