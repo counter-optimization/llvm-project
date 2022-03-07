@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+// #include "MCTargetDesc/X86BaseInfo.h"
 
 namespace llvm {
 
@@ -44,32 +45,6 @@ public:
     }
     bool runOnFunction(Function &F) override;
     void getAnalysisUsage(AnalysisUsage &AU) const override;
-};
-
-void initializeX86_64SilentStoreMitigationPassPass(PassRegistry &);
-
-class X86_64SilentStoreMitigationPass : public MachineFunctionPass {
-public:
-    static char ID;
-
-    X86_64SilentStoreMitigationPass() : MachineFunctionPass(ID) {
-        initializeX86_64SilentStoreMitigationPassPass(*PassRegistry::getPassRegistry());
-    }
-
-    ~X86_64SilentStoreMitigationPass() = default;
-
-    bool runOnMachineFunction(MachineFunction &MF) override;
-
-    bool shouldRunOnMachineFunction(MachineFunction &MF);
-
-    void getAnalysisUsage(AnalysisUsage &AU) const override {
-        MachineFunctionPass::getAnalysisUsage(AU);
-        AU.setPreservesCFG();
-    }
-
-    StringRef getPassName() const override {
-        return "Silent stores mitigations";
-    }
 };
 
 void initializeHandlesSecretsWrapperPassPass(PassRegistry &);

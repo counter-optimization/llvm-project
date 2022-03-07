@@ -449,7 +449,7 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
   }
 
   if (hasAttribute(Attribute::Secret)) {
-    return std::string("secret");
+    return std::string{"secret"};
   }
 
   // Convert target-dependent attributes to strings of the form:

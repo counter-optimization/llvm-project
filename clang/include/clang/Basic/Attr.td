@@ -621,8 +621,8 @@ class IgnoredAttr : Attr {
 // Attributes begin here
 //
 
-def Secret : InheritableParamAttr {
-  let Spellings = [GNU<"secret">];
+def Secret : InheritableAttr {
+  let Spellings = [Clang<"secret">];
   let Subjects = SubjectList<[Function, Var, Field, ParmVar]>;
   let Documentation = [Undocumented];
 }
