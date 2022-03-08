@@ -2,6 +2,7 @@
 #include "X86FrameLowering.h"
 #include "X86InstrInfo.h"
 #include "X86TargetMachine.h"
+#include "X86InstrBuilder.h"
 #include "X86.h"
 #include "X86MachineFunctionInfo.h"
 #include "X86RegisterInfo.h"
@@ -55,11 +56,20 @@ public:
 // 5. Store r11 into Address
 // 6. Store SensitiveData into Address
 void doX86SilentStoreHardening(
-        MachineInstr& MI, MachineBasicBlock& MBB, MachineFunction& MF) {
+        MachineInstr& MI, 
+        MachineBasicBlock& MBB, 
+        MachineBasicBlock::iterator& MBBI,
+        MachineFunction& MF) {
     DebugLoc DL = MI.getDebugLoc();
     const auto& STI = MF.getSubtarget();
     auto* TII = STI.getInstrInfo();
     auto* TRI = STI.getRegisterInfo();
+
+    // auto MBBI = MBB.instr_begin();
+    // while (*MBBI != MI) { 
+    //     MBBI++;
+    // }
+    // errs() << "MBBI is at insn: " << *MBBI << '\n';
 
     switch (MI.getOpcode()) {
         case X86::MOV64mr: {
@@ -79,10 +89,12 @@ void doX86SilentStoreHardening(
             errs() << "Address isReg?: " << Address.isReg() << '\n';
             errs() << "SensitiveData isReg?: " << SensitiveData.isReg() << '\n';
             // BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), Register(X86::R11))
-            BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
-                .addReg(Register(X86::R11))
-                .addImm(Offset.getImm())
-                .addReg(Address.getReg());
+            // BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
+            //     .addReg(Register(X86::R11))
+            //     .addImm(Offset.getImm())
+            //     .addReg(Address.getReg());
+            addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11),
+                         Address.getReg(), true, Offset.getImm());
             BuildMI(MBB, MI, DL, TII->get(X86::AND32ri8), Register(X86::R11D))
                 .addReg(Register(X86::R11D))
                 .addImm(0);
@@ -90,16 +102,28 @@ void doX86SilentStoreHardening(
                 .addReg(SensitiveData.getReg());
             BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
                 .addReg(Register(X86::R11));
+
             // BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr), Register(X86::RBP))
-            BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
-                .addReg(Address.getReg())
-                .addImm(Offset.getImm())
-                .addReg(Register(X86::R11));
+            // BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+            //     .addReg(Address.getReg())
+            //     .addImm(Offset.getImm())
+            //     .addReg(Register(X86::R11));
+            // BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr), X86::RBP, false, Offset.getImm())
+            //     .addReg(X86::R11);
+            addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr)), X86::RBP, false, Offset.getImm())
+                .addReg(X86::R11);
+            // BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr), X86::RBP, false, Offset.getImm())
+                // .addReg(X86::R11);
+
             // BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr), Register(X86::RBP))
-            BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
-                .addReg(Address.getReg())
-                .addImm(Offset.getImm())
-                .addReg(SensitiveData.getReg());
+            // BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+            //     .addReg(Address.getReg())
+            //     .addImm(Offset.getImm())
+            //     .addReg(SensitiveData.getReg());
+            // BuildMI(MBB, MBBI, DL, TII->get(X86::MOV64mr), Address.getReg(), false, Offset.getImm())
+            //     .addReg(SensitiveData.getReg());
+            // addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr)), Address.getReg(), false, Offset.getImm())
+            //     .addReg(SensitiveData.getReg());
             break;
         }
         default: {
@@ -115,14 +139,15 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     }
 
     for (auto& MBB : MF) {
-        for (auto& MI : MBB) {
+        for (auto MBBI = MBB.begin(); MBBI != MBB.end(); MBBI++) {
+            auto& MI = *MBBI;
             if (MI.mayStore()) {
                 errs() << "Function " << MF.getName() << " instr " << MI;
                 errs() << " may store.";
 
                 // dont harden initial `push rbp`
                 if (!MI.getFlag(MachineInstr::MIFlag::FrameSetup)) {
-                    doX86SilentStoreHardening(MI, MBB, MF);
+                    doX86SilentStoreHardening(MI, MBB, MBBI, MF);
 
                     errs() << "MI has " << MI.getNumOperands() << " operands\n";
                     const auto& OP0 = MI.getOperand(0);
@@ -140,8 +165,15 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 
 // This will eventually check for the secret attribute. For now, just use function names.
 bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(MachineFunction& MF) {
-    StringRef TargetFunctionName{"fix_convert_from_int64"};
-    return MF.getName().contains(TargetFunctionName);
+    Function& F = MF.getFunction();
+
+    for (auto& Arg : F.args()) {
+        if (Arg.hasAttribute(Attribute::Secret)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 char X86_64SilentStoreMitigationPass::ID = 0;
