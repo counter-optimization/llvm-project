@@ -156,7 +156,7 @@ INITIALIZE_PASS_DEPENDENCY(EdgeBundles)
 INITIALIZE_PASS_DEPENDENCY(SpillPlacement)
 INITIALIZE_PASS_DEPENDENCY(MachineOptimizationRemarkEmitterPass)
 INITIALIZE_PASS_DEPENDENCY(RegAllocEvictionAdvisorAnalysis)
-// INITIALIZE_PASS_DEPENDENCY(HandlesSecretsModulePass)
+INITIALIZE_PASS_DEPENDENCY(HandlesSecretsWrapperPass)
 INITIALIZE_PASS_END(RAGreedy, "greedy",
                 "Greedy Register Allocator", false, false)
 
@@ -224,8 +224,8 @@ void RAGreedy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<SpillPlacement>();
   AU.addRequired<MachineOptimizationRemarkEmitterPass>();
   AU.addRequired<RegAllocEvictionAdvisorAnalysis>();
-  // AU.addRequired<HandlesSecretsModulePass>();
-  // AU.addPreserved<HandlesSecretsModulePass>();
+  AU.addRequired<HandlesSecretsWrapperPass>();
+  AU.addPreserved<HandlesSecretsWrapperPass>();
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
@@ -2921,15 +2921,18 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SpillPlacer = &getAnalysis<SpillPlacement>();
   DebugVars = &getAnalysis<LiveDebugVariables>();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
-  // errs() << "In RegAllocGreedy, getting results of hs module pass\n";
-  // HS = &getAnalysis<HandlesSecretsModulePass>();
+  HS = &getAnalysis<HandlesSecretsWrapperPass>();
 
-  // errs() << "In RegAllocGreedy, Function " << MF->getName() << " handles secrets?: ";
-  // errs() << HS->functionHandlesSecrets(MF->getFunction()) << '\n';
+  errs() << "In RegAllocGreedy, Function " << MF->getName() << " handles secrets?: ";
+  errs() << HS->functionHandlesSecrets() << '\n';
 
   initializeCSRCost();  
 
   RegCosts = TRI->getRegisterCosts(*MF);
+  uint32_t RegNo = 0;
+  // for (auto cost : RegCosts) {
+  //   errs() << "In RegAllocGreedy, RegNo " << RegNo++ << " has cost: " << cost << "\n";
+  // }
 
   VRAI = std::make_unique<VirtRegAuxInfo>(*MF, *LIS, *VRM, *Loops, *MBFI);
   SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM, *VRAI));

@@ -183,6 +183,7 @@ private:
   SpillPlacement *SpillPlacer;
   LiveDebugVariables *DebugVars;
   AliasAnalysis *AA;
+  HandlesSecretsWrapperPass *HS;
 
   // state
   std::unique_ptr<Spiller> SpillerInstance;
