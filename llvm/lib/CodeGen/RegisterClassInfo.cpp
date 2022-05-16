@@ -103,7 +103,7 @@ void RegisterClassInfo::compute(const TargetRegisterClass *RC) const {
   unsigned N = 0;
   SmallVector<MCPhysReg, 16> CSRAlias;
   uint8_t MinCost = uint8_t(~0u);
-  uint8_t LastCost = uint8_t(~0u);
+  uint8_t LastCost = uint8_t(~0u);e-
   unsigned LastCostChange = 0;
 
   // FIXME: Once targets reserve registers instead of removing them from the
