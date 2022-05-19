@@ -432,6 +432,9 @@ void X86ATTInstPrinter::printMemReference(const MCInst *MI, unsigned Op,
   // If this has a segment register, print it.
   printOptionalSegReg(MI, Op + X86::AddrSegmentReg, O);
 
+  errs() << "in x86ATTInstPrinter::printMemReference: MI is: "
+         << MI << '\n';
+  MI->print(errs());
   if (DispSpec.isImm()) {
     int64_t DispVal = DispSpec.getImm();
     if (DispVal || (!IndexReg.getReg() && !BaseReg.getReg()))

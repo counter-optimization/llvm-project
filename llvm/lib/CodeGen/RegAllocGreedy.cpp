@@ -2904,8 +2904,6 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   if (HS->functionHandlesSecrets()) {
     auto ReservedRegs = TRI->getReservedRegs(mf);
     auto r11b = MCRegister::from(247u);
-    errs() << "R11B guess name: " << TRI->getRegAsmName(r11b) << '\n';
-    // assert(MF->getRegInfo().canReserveReg(r11b));
     TRI->markSuperRegs(ReservedRegs, r11b);
   }
 

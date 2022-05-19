@@ -1080,6 +1080,8 @@ const unsigned TiedMax = 15;
 /// instruction. INLINEASM instructions allow more tied defs.
 ///
 void MachineInstr::tieOperands(unsigned DefIdx, unsigned UseIdx) {
+  errs() << "In tieOperands, DefIdx is " << DefIdx << ", and "
+         << "UseIdx is " << UseIdx << '\n';
   MachineOperand &DefMO = getOperand(DefIdx);
   MachineOperand &UseMO = getOperand(UseIdx);
   assert(DefMO.isDef() && "DefIdx must be a def operand");

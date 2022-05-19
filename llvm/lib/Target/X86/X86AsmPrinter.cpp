@@ -78,6 +78,8 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
     OutStreamer->EndCOFFSymbolDef();
   }
 
+  errs() << "In X86AsmPrinter, Emitting ASM for function: " 
+         << MF.getFunction().getName() << '\n';
   // Emit the rest of the function body.
   emitFunctionBody();
 

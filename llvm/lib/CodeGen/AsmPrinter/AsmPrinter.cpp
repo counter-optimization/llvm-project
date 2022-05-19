@@ -1280,6 +1280,9 @@ void AsmPrinter::emitFunctionBody() {
     emitBasicBlockStart(MBB);
     DenseMap<StringRef, unsigned> MnemonicCounts;
     for (auto &MI : MBB) {
+      errs() << "In AsmPrinter, machine instruction is: ";
+      MI.print(errs());
+      errs() << '\n';
       // Print the assembly for the instruction.
       if (!MI.isPosition() && !MI.isImplicitDef() && !MI.isKill() &&
           !MI.isDebugInstr()) {

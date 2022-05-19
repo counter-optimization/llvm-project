@@ -65,56 +65,132 @@ void doX86SilentStoreHardening(
     auto* TRI = STI.getRegisterInfo();
 
     switch (MI.getOpcode()) {
-        // case X86::MOV8mr: {
-        //     auto NumOperands = MI.getNumOperands();
+        case X86::MOV8mr: {
+            auto NumOperands = MI.getNumOperands();
 
-        //     for (auto ii = 0; ii < NumOperands; ++ii) {
-        //         errs() << "Operand " << ii << " is " << MI.getOperand(ii) << '\n';
-        //     }
+            for (auto ii = 0; ii < NumOperands; ++ii) {
+                errs() << "Operand " << ii << " is " << MI.getOperand(ii) << '\n';
+            }
 
-        //     auto& BaseRegMO = MI.getOperand(0);
-        //     auto& ScaleMO = MI.getOperand(1);
-        //     auto& IndexMO = MI.getOperand(2);
-        //     auto& OffsetMO = MI.getOperand(3);
-        //     auto& SegmentMO = MI.getOperand(4);
-        //     auto& DestRegMO = MI.getOperand(5);
+            auto& BaseRegMO = MI.getOperand(0);
+            auto& ScaleMO = MI.getOperand(1);
+            auto& IndexMO = MI.getOperand(2);
+            auto& OffsetMO = MI.getOperand(3);
+            auto& SegmentMO = MI.getOperand(4);
+            auto& DestRegMO = MI.getOperand(5);
 
-        //     BuildMI(MBB, MI, DL, TII->get(X86::XOR64rr), X86::R11)
-        //         .addReg(X86::R11);
+            errs() << "1\n";
+            // addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R11B),
+            //              BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
+            BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm))
+                .addReg(X86::R11B)
+                .addReg(BaseRegMO.getReg())
+                .addImm(1)
+                .addReg(Register())
+                .addImm(OffsetMO.getImm())
+                .addReg(Register());
 
-        //     // Read secret into scratch
-        //     BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
-        //         .addReg(DestRegMO.getReg());
+            errs() << "2\n";
 
-        //     BuildMI(MBB, MI, DL, TII->get(X86::SHL64ri), X86::R11)
-        //         .addReg(X86::R11)
-        //         .addImm(32);
+            BuildMI(MBB, MI, DL, TII->get(X86::AND8ri8), X86::R11B)
+                .addReg(X86::R11B)
+                .addImm(0xF0);
 
-        //     // Insert insn to read the contents of destination address into R11
-        //     addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R11B),
-        //                  BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
+            errs() << "3\n";
+            BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
+                .addReg(Register(X86::R11B));
 
-        //     // Insert insn to zero out the low 4bits of R11 (aka R11D)
-        //     BuildMI(MBB, MI, DL, TII->get(X86::AND8ri8), Register(X86::R11B))
-        //         .addReg(Register(X86::R11))
-        //         .addImm(0xF0);
+            // addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr)), 
+            //              BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm())
+            //     .addReg(X86::R11B);
+            errs() << "4\n";
+            BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+                .addReg(BaseRegMO.getReg())
+                .addImm(1)
+                .addReg(Register())
+                .addImm(OffsetMO.getImm())
+                .addReg(Register())
+                .addReg(X86::R11B);
+            errs() << "5\n";
+            BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+                .addReg(DestRegMO.getReg());
+            errs() << "6\n";
+            BuildMI(MBB, MI, DL, TII->get(X86::AND8ri8), X86::R11B)
+                .addReg(X86::R11B)
+                .addImm(0x0F); 
+            errs() << "7\n";
+            BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
+                .addReg(Register(X86::R11B));
+            errs() << "8\n";
+            auto MIB = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B); 
+            MIB.addReg(X86::R11B);
+            addRegOffset(MIB, BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm());
+            // addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B), 
+            //              BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm());
+            // auto MIB = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm));
+            //     errs() << "A\n";
+            //     MIB.addReg(X86::R11B);
+            //     errs() << "AA\n";
+            //     MIB.addReg(X86::R11B);
+            //     errs() << "B\n";
+            //     MIB.addReg(BaseRegMO.getReg());
+            //     errs() << "C\n";
+            //     MIB.addImm(1);
+            //     errs() << "D\n";
+            //     MIB.addReg(Register());
+            //     errs() << "E\n";
+            //     MIB.addImm(OffsetMO.getImm());
+            //     errs() << "F\n";
+            //     MIB.addReg(Register());
+            errs() << "9\n";
+            // addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr)), 
+            //              BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm())
+            //             .addReg(X86::R11B);
+            BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+                .addReg(BaseRegMO.getReg()) // Base
+                .addImm(1) // Scale
+                .addReg(Register()) // Index
+                .addImm(OffsetMO.getImm()) // Disp/offset
+                .addReg(Register()) // Segment reg
+                .addReg(X86::R11B);
+            errs() << "10\n";
+            // END OF NEW CHANGES
+            // BuildMI(MBB, MI, DL, TII->get(X86::XOR64rr), X86::R11)
+            //     .addReg(X86::R11);
 
-        //     // Insert insn to move the secret data into the low 4bits of R11
-        //     BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
-        //         .addReg(DestRegMO.getReg());
+            // // Read secret into scratch
+            // BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+            //     .addReg(DestRegMO.getReg());
 
-        //     // Insert insn to bitwise not all of R11
-        //     BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
-        //         .addReg(Register(X86::R11));
+            // BuildMI(MBB, MI, DL, TII->get(X86::SHL64ri), X86::R11)
+            //     .addReg(X86::R11)
+            //     .addImm(32);
 
-        //     // Insert insn to store R11, whose contents is NOT EQUAL to the contents
-        //     // of (BaseRegMO + OffsetMO) or DestRegMO
-        //     addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr)), 
-        //                  BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm())
-        //         .addReg(X86::R11);
+            // // Insert insn to read the contents of destination address into R11
+            // addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R11B),
+            //              BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
 
-        //     break;
-        //}
+            // // Insert insn to zero out the low 4bits of R11 (aka R11D)
+            // BuildMI(MBB, MI, DL, TII->get(X86::AND8ri8), Register(X86::R11B))
+            //     .addReg(Register(X86::R11))
+            //     .addImm(0xF0);
+
+            // // Insert insn to move the secret data into the low 4bits of R11
+            // BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
+            //     .addReg(DestRegMO.getReg());
+
+            // // Insert insn to bitwise not all of R11
+            // BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
+            //     .addReg(Register(X86::R11));
+
+            // // Insert insn to store R11, whose contents is NOT EQUAL to the contents
+            // // of (BaseRegMO + OffsetMO) or DestRegMO
+            // addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr)), 
+            //              BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm())
+            //     .addReg(X86::R11);
+
+            break;
+        }
         case X86::MOV64mr: {
             /*
             MI has 6 operands
@@ -137,14 +213,13 @@ void doX86SilentStoreHardening(
             addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11),
                          BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
 
-            // Insert insn to zero out the low 32bits of R11 (aka R11D)
+            // Insert insn to zero out the low 32 bits of r11d
             BuildMI(MBB, MI, DL, TII->get(X86::AND32ri8), Register(X86::R11D))
                 .addReg(Register(X86::R11D))
                 .addImm(0);
 
-            // Insert insn to move the secret data into the low 32bits of R11
-            // (aka R11D)    
-            BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Register(X86::R11D))
+            // Insert insn to move the secret data into the low 8bits of R11
+            BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
                 .addReg(DestRegMO.getReg());
 
             // Insert insn to bitwise not all of R11
