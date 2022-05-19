@@ -49,20 +49,16 @@ public:
     }
 };
 
-// 1. Move contents of Address into r11 (saved by reg alloc)
-// 2. Mask off the bottom half bits of r11
-// 3. Move SensitiveData holding register into r11d
-// 4. Bitwise not r11 into r11
-// 5. Store r11 into Address
-// 6. Store SensitiveData into Address
 void doX86SilentStoreHardening(
         MachineInstr& MI, 
         MachineBasicBlock& MBB, 
         MachineFunction& MF) {
+
     DebugLoc DL = MI.getDebugLoc();
     const auto& STI = MF.getSubtarget();
     auto* TII = STI.getInstrInfo();
     auto* TRI = STI.getRegisterInfo();
+    auto& MRI = MF.getRegInfo();
 
     switch (MI.getOpcode()) {
         case X86::MOV8mr:
@@ -147,19 +143,20 @@ void doX86SilentStoreHardening(
             addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R11D),
                          BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
 
-            // Insert insn to zero out the low 16 bits of r11d
-            // I don't think this is necessary
-            // BuildMI(MBB, MI, DL, TII->get(X86::AND16ri8), Register(X86::R11W))
-            //     .addReg(Register(X86::R11W))
-            //     .addImm(0);
-
             // Insert insn to move the secret data into the low 16bits of R11
             if (DestRegMO.isImm()) {
+                // TODO: This needs to be checked to not truncate the value
                  BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Register(X86::R11W))
-                    .addReg(DestRegMO.getImm());
+                    .addImm(DestRegMO.getImm());
             } else {
+                Register fixedWidthDestReg = DestRegMO.getReg();
+                if (16 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
+                    // sub reg index 4 is 
+                    // each 32/64 bit gpr's word sized subregister
+                    fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 4);
+                }
                 BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Register(X86::R11W))
-                    .addReg(DestRegMO.getReg());
+                    .addReg(fixedWidthDestReg);
             }
 
             // Insert insn to bitwise not all of R11
@@ -188,8 +185,10 @@ void doX86SilentStoreHardening(
             auto& DestRegMO = MI.getOperand(5);
 
             // Insert insn to read the contents of destination address into R11
-            addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11),
-                         BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
+            if (DestRegMO.isReg()) {
+                addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11),
+                             BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
+            }
 
             // Insert insn to zero out the low 32 bits of r11d
             BuildMI(MBB, MI, DL, TII->get(X86::AND32ri8), Register(X86::R11D))
@@ -199,10 +198,25 @@ void doX86SilentStoreHardening(
             // Insert insn to move the secret data into the low 8bits of R11
             if (DestRegMO.isImm()) {
                  BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), Register(X86::R11B))
-                    .addReg(DestRegMO.getImm());
+                    .addImm(DestRegMO.getImm());
             } else {
+                auto SRIByte = TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AL));
+                auto SRIWord = TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AX));
+                auto SRIDouble = TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::EAX));
+                errs() << "SRIByte: " << SRIByte << '\n';
+                errs() << "SRIWord: " << SRIWord << '\n';
+                errs() << "SRIDouble: " << SRIDouble << '\n';
+                errs() << "Subregidx ax of eax: " 
+                       << TRI->getSubRegIndex(MCRegister(X86::EAX), MCRegister(X86::AX))
+                       << '\n';
+
+                Register fixedWidthDestReg = DestRegMO.getReg();
+                if (8 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
+                    // 1 should be the smallest, least significant subreg
+                    fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 1);
+                }
                 BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
-                    .addReg(DestRegMO.getReg());
+                    .addReg(fixedWidthDestReg);
             }
 
             // Insert insn to bitwise not all of R11
