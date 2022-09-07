@@ -1,3 +1,7 @@
+#include <fstream>
+#include <sstream>
+#include <string>
+
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "X86FrameLowering.h"
 #include "X86InstrInfo.h"
@@ -47,9 +51,100 @@ public:
     StringRef getPassName() const override {
         return "Silent stores mitigations";
     }
+
+private:
+    /* The number of instructions coming before this instruction.
+     * This is 0 for the first instruction of the function, 1 for the
+     * next insn, ...
+     */
+    size_t InstructionIdx = 0;
+
+    /* Number of instructions instrumented so far. This should match
+     * the number of alerts in the csv file from the checker.
+     */
+    size_t NumInstrumented = 0;
+
+    std::vector<size_t> IndicesToInstrument;
+
+    void doX86SilentStoreHardening(MachineInstr& MI,
+        MachineBasicBlock& MBB,
+        MachineFunction& MF);
+
+    struct CheckerAlertCSVLine {
+        bool SilentStore;
+        bool CompSimp;
+        bool Dmp;
+        size_t InsnIdx;
+
+        CheckerAlertCSVLine(std::string Line) {
+            std::istringstream StrReader(Line);
+
+            constexpr size_t NumCols = 4;
+            std::array<unsigned int, NumCols> Cols;
+            char ColChars[512] = {0};
+            size_t ColsRead = 0;
+
+            while (StrReader.getline(ColChars, 512, ',')) {
+                unsigned int CurColValue = std::stoul(std::string(ColChars));
+                Cols[ColsRead++] = CurColValue;
+            }
+
+            assert(ColsRead == NumCols && "Checker alert CSV col header mismatch.");
+
+            SilentStore = Cols[0] == 1UL;
+            CompSimp = Cols[1] == 1UL;
+            Dmp = Cols[2] == 1UL;
+            InsnIdx = Cols[3];
+        }
+    };
+
+    std::vector<CheckerAlertCSVLine> RelevantCSVLines;
+
+    void readCheckerAlertCSV(std::string Filename);
+    bool isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine &Line);
 };
 
-void doX86SilentStoreHardening(
+/*
+ * The CSV file has the following header:
+ * harden_silentstore,harden_compsimp,harden_dmp,insn_idx
+ */
+void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(std::string Filename) {
+    std::ifstream IFS(Filename);
+
+    if (!IFS.is_open()) {
+        errs() << "Couldn't open file " << Filename << " from checker.\n";
+        assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
+    }
+
+    constexpr size_t MaxLineSize = 512; // 512 chars should be more than enough
+    char Line[MaxLineSize] = {0};
+    std::string ExpectedHeader("harden_silentstore,harden_compsimp,harden_dmp,insn_idx");
+    bool IsHeader = true;
+
+    // operator bool() on the returned this* from .getline returns 
+    // false. i think it returns false when EOF is hit? 
+    while (IFS.getline(Line, MaxLineSize)) {
+        std::string CurrentLine(Line);
+
+        if (IsHeader) {
+            assert(ExpectedHeader == CurrentLine && "Unexpected header in checker alert csv file");
+            IsHeader = false;
+        } else {
+            CheckerAlertCSVLine CSVLine(CurrentLine);
+
+            if (isRelevantCheckerAlertCSVLine(CSVLine)) {
+                RelevantCSVLines.push_back(CSVLine);
+                IndicesToInstrument.push_back(CSVLine.InsnIdx);
+            }
+        }
+    }
+}
+
+bool X86_64SilentStoreMitigationPass::isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine &Line) {
+    return Line.SilentStore;
+}
+
+void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         MachineInstr& MI, 
         MachineBasicBlock& MBB, 
         MachineFunction& MF) {
@@ -59,6 +154,8 @@ void doX86SilentStoreHardening(
     auto* TII = STI.getInstrInfo();
     auto* TRI = STI.getRegisterInfo();
     auto& MRI = MF.getRegInfo();
+
+    bool OpcodeSupported = true;
 
     switch (MI.getOpcode()) {
         case X86::MOV8mr:
@@ -237,9 +334,14 @@ void doX86SilentStoreHardening(
         default: 
         {
             errs() << "Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
+            OpcodeSupported = false;
             // assert(false && "Unsupported opcode in X86SilentStoreHardening");
             break;
         }
+    }
+
+    if (OpcodeSupported) { // then it was instrumented
+        NumInstrumented += 1;
     }
 }
 
@@ -248,7 +350,10 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
         return false; // Doesn't modify the func if not running
     }
 
+    readCheckerAlertCSV("test_alert.csv");
+
     bool doesModifyFunction{false};
+
     for (auto& MBB : MF) {
         for (auto& MI : MBB) {
             // Don't harden frame setup stuff like `push rbp`
@@ -256,8 +361,10 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
                 doX86SilentStoreHardening(MI, MBB, MF);
                 doesModifyFunction = true; // Modifies the func if it does run
             }
+
+            InstructionIdx += 1;
         }
-        errs() << MBB << '\n';
+        // errs() << MBB << '\n';
     }
 
     return doesModifyFunction;
