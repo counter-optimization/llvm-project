@@ -92,6 +92,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   initializeX86PartialReductionPass(PR);
   initializePseudoProbeInserterPass(PR);
   initializeX86_64SilentStoreMitigationPassPass(PR);
+  initializeX86_64CompSimpMitigationPassPass(PR);
   // initializeX86MachineInstrPrinterPass(PR);
 }
 
@@ -605,6 +606,7 @@ void X86PassConfig::addPreEmitPass2() {
     }));
 
   addPass(createX86_64SilentStoreMitigationPass());
+  addPass(createX86_64CompSimpMitigationPass());
   // addPass(createX86MachineInstrPrinterPass());
 }
 

@@ -76,6 +76,7 @@ set(sources
   X86SelectionDAGInfo.cpp
   X86ShuffleDecodeConstantPool.cpp
   X86SilentStoreHardening.cpp
+  X86CompSimpHardening.cpp
   X86SpeculativeLoadHardening.cpp
   X86SpeculativeExecutionSideEffectSuppression.cpp
   X86Subtarget.cpp

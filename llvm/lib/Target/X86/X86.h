@@ -155,6 +155,7 @@ FunctionPass *createX86SpeculativeLoadHardeningPass();
 FunctionPass *createX86SpeculativeExecutionSideEffectSuppression();
 // FunctionPass *createX86MachineInstrPrinterPass();
 FunctionPass* createX86_64SilentStoreMitigationPass();
+FunctionPass* createX86_64CompSimpMitigationPass();
 
 void initializeEvexToVexInstPassPass(PassRegistry &);
 void initializeFixupBWInstPassPass(PassRegistry &);
@@ -184,6 +185,7 @@ void initializeX86PreAMXConfigPassPass(PassRegistry &);
 void initializeX86LowerTileCopyPass(PassRegistry &);
 void initializeX86LowerAMXIntrinsicsLegacyPassPass(PassRegistry &);
 void initializeX86_64SilentStoreMitigationPassPass(PassRegistry &);
+void initializeX86_64CompSimpMitigationPassPass(PassRegistry &);
 // void initializeX86MachineInstrPrinterPass(PassRegistry &);
 
 namespace X86AS {
