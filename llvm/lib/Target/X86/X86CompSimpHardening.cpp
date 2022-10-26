@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DebugLoc.h"
 
+#include "cmath"
 #include "llvm/Pass.h"
 
 using namespace llvm;
@@ -43,39 +44,115 @@ public:
   }
 
 private:
-  void doX86CompSimpHardening(MachineInstr &MI, MachineBasicBlock &MBB,
-                              MachineFunction &MF);
+  void doX86CompSimpHardening(MachineInstr *MI);
 };
 } // end anonymous namespace
 
-void X86_64CompSimpMitigationPass::doX86CompSimpHardening(
-    MachineInstr &MI, MachineBasicBlock &MBB, MachineFunction &MF) {
-
-  DebugLoc DL = MI.getDebugLoc();
-  const auto &STI = MF.getSubtarget();
+void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
   auto *TII = STI.getInstrInfo();
   auto *TRI = STI.getRegisterInfo();
-  auto &MRI = MF.getRegInfo();
+  auto &MRI = MF->getRegInfo();
 
-  switch (MI.getOpcode()) {}
+  switch (MI->getOpcode()) {
+  case X86::SUB32rm:
+  case X86::SUB32rr: {
+
+    /**
+     *  subl ecx eax
+     *
+     *    ↓
+     *
+     *  subl eax, 2^31 ;; this and next 2 insns are safe test for zero
+     *  subl eax, 2^31
+     *  setz r11b ;; doesn't affect flags, but sets r11b
+     *  cmovz r13d, eax ;; save eax
+     *  cmovz r12d, ecx ;; save ecx
+     *  cmovz eax, r11d ;; load into eax 1 if eax was originally zero, or do
+     * nothing if it was non-zero subl ecx, eax ;; if eax originally 0, then
+     * this is blinding on r11d, else if eax non-zero, then it's the real
+     * subtraction subl r11, 2^31 ;; this and next 2 insns are safe test for
+     * zero (in this case, r11b = 1 if eax = 0, so test for non-zero really)
+     *  subl r11, 2^31
+     *  cmovnz ecx, r12d ;; just load ecx into ecx if eax was originally zero
+     *  cmovnz eax, r13d ;; re-load saved eax since we clobbered it for blinding
+     */
+
+    MachineOperand Op1 = MI->getOperand(1);
+    MachineOperand Op2 = MI->getOperand(2);
+
+    assert(Op1.isReg() && "Op1 is a reg");
+    assert(Op2.isReg() && "Op2 is a reg");
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32ri), Op2.getReg())
+        .addReg(Op2.getReg())
+        .addImm(pow(2, 31));
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32ri), Op2.getReg())
+        .addReg(Op2.getReg())
+        .addImm(pow(2, 31));
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SETCCr), X86::R11B).addImm(4);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::CMOV32rr), X86::R10D)
+        .addReg(X86::R10D)
+        .addReg(Op2.getReg())
+        .addImm(4);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::CMOV32rr), X86::R9D)
+        .addReg(X86::R9D)
+        .addReg(Op1.getReg())
+        .addImm(4);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::CMOV32rr), Op2.getReg())
+        .addReg(Op2.getReg())
+        .addReg(X86::R11D)
+        .addImm(4);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32rr), Op1.getReg())
+        .addReg(Op1.getReg())
+        .addReg(Op2.getReg());
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32ri), X86::R11)
+        .addReg(X86::R11)
+        .addImm(pow(2, 31));
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32ri), X86::R11)
+        .addReg(X86::R11)
+        .addImm(pow(2, 31));
+    BuildMI(*MBB, *MI, DL, TII->get(X86::CMOV32rr), Op1.getReg())
+        .addReg(Op1.getReg())
+        .addReg(X86::R9D)
+        .addImm(5);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::CMOV32rr), Op2.getReg())
+        .addReg(Op2.getReg())
+        .addReg(X86::R10D)
+        .addImm(5);
+    MI->eraseFromParent();
+    break;
+  }
+  }
 }
 
 bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
-  if (!shouldRunOnMachineFunction(MF)) {
+  llvm::errs() << "CS: Runing comp simp mitigation pass\n";
+  // TODO: remove the short circuit for formal testing
+  if (false && !shouldRunOnMachineFunction(MF)) {
     return false; // Doesn't modify the func if not running
   }
-
   bool doesModifyFunction{false};
 
+  std::vector<MachineInstr *> Instructions;
+  MF.print(llvm::errs());
   for (auto &MBB : MF) {
     for (auto &MI : MBB) {
       // Don't harden frame setup stuff like `push rbp`
-      if (MI.mayStore() && !MI.getFlag(MachineInstr::MIFlag::FrameSetup)) {
-        doX86CompSimpHardening(MI, MBB, MF);
+      if (!MI.mayLoadOrStore() &&
+          !MI.getFlag(MachineInstr::MIFlag::FrameSetup)) {
+        Instructions.push_back(&MI);
         doesModifyFunction = true; // Modifies the func if it does run
       }
     }
   }
+  for (MachineInstr *MI : Instructions) {
+    doX86CompSimpHardening(MI);
+  }
+  MF.print(llvm::errs());
   return doesModifyFunction;
 }
 
