@@ -49,8 +49,54 @@ private:
   void doX86CompSimpHardening(MachineInstr *MI);
   void subFallBack(MachineInstr *MI);
   void insertSafeSub32Before(MachineInstr *MI);
+  void insertSafeAdd32Before(MachineInstr *MI);
 };
 } // end anonymous namespace
+
+void X86_64CompSimpMitigationPass::insertSafeAdd32Before(MachineInstr *MI) {
+  /**
+   *  addl ecx eax
+   *
+   *    ↓
+   *
+   *  movq rdx, 2^32
+   *  subq rax, rdx
+   *  subq rcx, rdx
+   *  addq rcx, rax
+   *  movq rdx, -(2^33)
+   *  subq rcx, rdx
+   *
+   */
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  MachineOperand Op1 = MI->getOperand(1);
+  MachineOperand Op2 = MI->getOperand(2);
+
+  assert(Op1.isReg() && "Op1 is a reg");
+  assert(Op2.isReg() && "Op2 is a reg");
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(pow(2, 32));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Op2.getReg())
+      .addReg(Op2.getReg())
+      .addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Op1.getReg())
+      .addReg(Op1.getReg())
+      .addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), Op1.getReg())
+      .addReg(Op1.getReg())
+      .addReg(Op2.getReg());
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
+      .addImm(-1 * pow(2, 33));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Op1.getReg())
+      .addReg(Op1.getReg())
+      .addReg(X86::R11);
+}
 
 void X86_64CompSimpMitigationPass::insertSafeSub32Before(MachineInstr *MI) {
   /**
@@ -182,10 +228,15 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
   switch (MI->getOpcode()) {
   case X86::SUB32rm:
   case X86::SUB32rr: {
-    insertSafeSub32Before(MI);
-    MI->print(llvm::errs());
-    llvm::errs() << "\n the above one <> \n";
+    // insertSafeSub32Before(MI);
+    // MI->eraseFromParent();
+    break;
+  }
+  case X86::ADD32rm:
+  case X86::ADD32rr: {
+    insertSafeAdd32Before(MI);
     MI->eraseFromParent();
+    break;
   }
   }
 }
