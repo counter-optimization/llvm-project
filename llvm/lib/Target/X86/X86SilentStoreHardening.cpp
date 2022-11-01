@@ -25,19 +25,16 @@
 
 #include "llvm/Pass.h"
 
-namespace llvm {
+using namespace llvm;
 
-void initializeX86_64SilentStoreMitigationPassPass(PassRegistry &);
+namespace {
 
 class X86_64SilentStoreMitigationPass : public MachineFunctionPass {
 public:
     static char ID;
 
     X86_64SilentStoreMitigationPass() : MachineFunctionPass(ID) {
-        initializeX86_64SilentStoreMitigationPassPass(*PassRegistry::getPassRegistry());
     }
-
-    ~X86_64SilentStoreMitigationPass() = default;
 
     bool runOnMachineFunction(MachineFunction &MF) override;
 
@@ -103,6 +100,7 @@ private:
     void readCheckerAlertCSV(std::string Filename);
     bool isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine &Line);
 };
+} // end anonymous namespace 
 
 /*
  * The CSV file has the following header:
@@ -212,10 +210,10 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
             BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
                 .addReg(Register(X86::R11B));
         
-            auto MIB = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B); 
+            auto MIB = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B);
             MIB.addReg(X86::R11B);
-            addRegOffset(MIB, BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm());
-
+            addOffset(MIB.addReg(BaseRegMO.getReg(), RegState::Kill),
+                      OffsetMO.getImm());
             BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
                 .addReg(BaseRegMO.getReg()) // Base
                 .addImm(1) // Scale
@@ -237,8 +235,9 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
             // Insert insn to read the contents of destination address into R11
             // mov32rm r11d, [baseregmo + offsetmo]
-            addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R11D),
-                         BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
+            addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R11D)
+                          .addReg(BaseRegMO.getReg(), RegState::Kill),
+                      OffsetMO);
 
             // Insert insn to move the secret data into the low 16bits of R11
             if (DestRegMO.isImm()) {
@@ -260,10 +259,11 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
             BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
                 .addReg(Register(X86::R11));
 
-            // Insert insn to store R11, whose contents is NOT EQUAL to the contents
-            // of (BaseRegMO + OffsetMO) or DestRegMO
-            addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr)), 
-                         BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm())
+            // Insert insn to store R11, whose contents is NOT EQUAL to the
+            // contents of (BaseRegMO + OffsetMO) or DestRegMO
+            addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+                          .addReg(BaseRegMO.getReg(), RegState::Kill),
+                      OffsetMO)
                 .addReg(X86::R11D);
 
             // No need to insert the actual store of the sensitive data. All of
@@ -283,8 +283,9 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
             // Insert insn to read the contents of destination address into R11
             if (DestRegMO.isReg()) {
-                addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11),
-                             BaseRegMO.getReg(), /*kills R11=*/true, OffsetMO.getImm());
+              addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11)
+                            .addReg(BaseRegMO.getReg(), RegState::Kill),
+                        OffsetMO);
             }
 
             // Insert insn to zero out the low 32 bits of r11d
@@ -320,10 +321,11 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
             BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
                 .addReg(Register(X86::R11));
 
-            // Insert insn to store R11, whose contents is NOT EQUAL to the contents
-            // of (BaseRegMO + OffsetMO) or DestRegMO
-            addRegOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr)), 
-                         BaseRegMO.getReg(), /*kills dest=*/false, OffsetMO.getImm())
+            // Insert insn to store R11, whose contents is NOT EQUAL to the
+            // contents of (BaseRegMO + OffsetMO) or DestRegMO
+            addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+                          .addReg(BaseRegMO.getReg(), RegState::Kill),
+                      OffsetMO)
                 .addReg(X86::R11);
 
             // No need to insert the actual store of the sensitive data. All of
@@ -383,13 +385,13 @@ bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(MachineFunction
     return false;
 }
 
+
 char X86_64SilentStoreMitigationPass::ID = 0;
 
-FunctionPass* createX86_64SilentStoreMitigationPass() {
+FunctionPass* llvm::createX86_64SilentStoreMitigationPass() {
     return new X86_64SilentStoreMitigationPass();
 }
 
 INITIALIZE_PASS(X86_64SilentStoreMitigationPass, "ss",
             "Mitigations for silent store optimizations", true, true)
 
-} // end namespace llvm
