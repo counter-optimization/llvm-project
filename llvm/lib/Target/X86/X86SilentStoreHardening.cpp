@@ -172,28 +172,48 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
             auto& SegmentMO = MI.getOperand(4);
             auto& DestRegMO = MI.getOperand(5);
 
-            BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm))
-                .addReg(X86::R11B)
-                .addReg(BaseRegMO.getReg())
-                .addImm(1)
-                .addReg(Register())
-                .addImm(OffsetMO.getImm())
-                .addReg(Register());
+            if (OffsetMO.isImm())
+              BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm))
+                  .addReg(X86::R11B)
+                  .addReg(BaseRegMO.getReg())
+                  .addImm(1)
+                  .addReg(Register())
+                  .addImm(OffsetMO.getImm())
+                  .addReg(Register());
+            else
+              BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm))
+                  .addReg(X86::R11B)
+                  .addReg(BaseRegMO.getReg())
+                  .addImm(1)
+                  .addReg(Register())
+                  .addGlobalAddress(OffsetMO.getGlobal(), OffsetMO.getOffset(),
+                                    OffsetMO.getTargetFlags()) // Disp/offset
+                  .addReg(Register());
 
-            BuildMI(MBB, MI, DL, TII->get(X86::AND8ri8), X86::R11B)
+            BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
                 .addReg(X86::R11B)
                 .addImm(0xF0);
 
             BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
                 .addReg(Register(X86::R11B));
 
-            BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-                .addReg(BaseRegMO.getReg())
-                .addImm(1)
-                .addReg(Register())
-                .addImm(OffsetMO.getImm())
-                .addReg(Register())
-                .addReg(X86::R11B);
+            if (OffsetMO.isImm())
+              BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+                  .addReg(BaseRegMO.getReg())
+                  .addImm(1)
+                  .addReg(Register())
+                  .addImm(OffsetMO.getImm())
+                  .addReg(Register())
+                  .addReg(X86::R11B);
+            else
+              BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+                  .addReg(BaseRegMO.getReg())
+                  .addImm(1)
+                  .addReg(Register())
+                  .addGlobalAddress(OffsetMO.getGlobal(), OffsetMO.getOffset(),
+                                    OffsetMO.getTargetFlags()) // Disp/offset
+                  .addReg(Register())
+                  .addReg(X86::R11B);
 
             if (DestRegMO.isImm()) {
                  BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R11B)
@@ -203,7 +223,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
                     .addReg(DestRegMO.getReg());
             }
             
-            BuildMI(MBB, MI, DL, TII->get(X86::AND8ri8), X86::R11B)
+            BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
                 .addReg(X86::R11B)
                 .addImm(0x0F); 
 
@@ -213,14 +233,26 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
             auto MIB = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B);
             MIB.addReg(X86::R11B);
             addOffset(MIB.addReg(BaseRegMO.getReg(), RegState::Kill),
-                      OffsetMO.getImm());
-            BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-                .addReg(BaseRegMO.getReg()) // Base
-                .addImm(1) // Scale
-                .addReg(Register()) // Index
-                .addImm(OffsetMO.getImm()) // Disp/offset
-                .addReg(Register()) // Segment reg
-                .addReg(X86::R11B);
+                      OffsetMO);
+
+            if (OffsetMO.isImm())
+              BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+                  .addReg(BaseRegMO.getReg()) // Base
+                  .addImm(1)                  // Scale
+                  .addReg(Register())         // Index
+                  .addImm(OffsetMO.getImm())  // Disp/offset
+                  .addReg(Register())         // Segment reg
+                  .addReg(X86::R11B);
+            else
+              BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+                  .addReg(BaseRegMO.getReg()) // Base
+                  .addImm(1)                  // Scale
+                  .addReg(Register())         // Index
+                  .addGlobalAddress(OffsetMO.getGlobal(), OffsetMO.getOffset(),
+                                    OffsetMO.getTargetFlags()) // Disp/offset
+                  .addReg(Register())                          // Segment reg
+                  .addReg(X86::R11B);
+
             break;
         }
         case X86::MOV32mr:
