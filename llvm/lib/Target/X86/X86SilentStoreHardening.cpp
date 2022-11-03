@@ -146,237 +146,218 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         MachineInstr& MI, 
         MachineBasicBlock& MBB, 
         MachineFunction& MF) {
+  DebugLoc DL = MI.getDebugLoc();
+  const auto &STI = MF.getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF.getRegInfo();
 
-    DebugLoc DL = MI.getDebugLoc();
-    const auto& STI = MF.getSubtarget();
-    auto* TII = STI.getInstrInfo();
-    auto* TRI = STI.getRegisterInfo();
-    auto& MRI = MF.getRegInfo();
+  bool OpcodeSupported = true;
 
-    bool OpcodeSupported = true;
+  switch (MI.getOpcode()) {
+  case X86::MOV8mr:
+  case X86::MOV8mi: {
+    auto NumOperands = MI.getNumOperands();
 
-    switch (MI.getOpcode()) {
-        case X86::MOV8mr:
-        case X86::MOV8mi: 
-        {
-            auto NumOperands = MI.getNumOperands();
+    // for (auto ii = 0; ii < NumOperands; ++ii) {
+    //     errs() << "Operand " << ii << " is " << MI.getOperand(ii) <<
+    //     '\n';
+    // }
 
-            for (auto ii = 0; ii < NumOperands; ++ii) {
-                errs() << "Operand " << ii << " is " << MI.getOperand(ii) << '\n';
-            }
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &DestRegMO = MI.getOperand(5);
 
-            auto& BaseRegMO = MI.getOperand(0);
-            auto& ScaleMO = MI.getOperand(1);
-            auto& IndexMO = MI.getOperand(2);
-            auto& OffsetMO = MI.getOperand(3);
-            auto& SegmentMO = MI.getOperand(4);
-            auto& DestRegMO = MI.getOperand(5);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm))
+        .addReg(X86::R11B)
+        .addReg(BaseRegMO.getReg())
+        .add(ScaleMO)
+        .add(IndexMO)
+        .add(OffsetMO)
+        .add(SegmentMO);
 
-            if (OffsetMO.isImm())
-              BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm))
-                  .addReg(X86::R11B)
-                  .addReg(BaseRegMO.getReg())
-                  .addImm(1)
-                  .addReg(Register())
-                  .addImm(OffsetMO.getImm())
-                  .addReg(Register());
-            else
-              BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm))
-                  .addReg(X86::R11B)
-                  .addReg(BaseRegMO.getReg())
-                  .addImm(1)
-                  .addReg(Register())
-                  .addGlobalAddress(OffsetMO.getGlobal(), OffsetMO.getOffset(),
-                                    OffsetMO.getTargetFlags()) // Disp/offset
-                  .addReg(Register());
+    BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
+        .addReg(X86::R11B)
+        .addImm(0xF0);
 
-            BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
-                .addReg(X86::R11B)
-                .addImm(0xF0);
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
+        .addReg(Register(X86::R11B));
 
-            BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
-                .addReg(Register(X86::R11B));
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+        .addReg(BaseRegMO.getReg())
+        .add(ScaleMO)
+        .add(IndexMO)
+        .add(OffsetMO)
+        .add(SegmentMO)
+        .addReg(X86::R11B);
 
-            if (OffsetMO.isImm())
-              BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-                  .addReg(BaseRegMO.getReg())
-                  .addImm(1)
-                  .addReg(Register())
-                  .addImm(OffsetMO.getImm())
-                  .addReg(Register())
-                  .addReg(X86::R11B);
-            else
-              BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-                  .addReg(BaseRegMO.getReg())
-                  .addImm(1)
-                  .addReg(Register())
-                  .addGlobalAddress(OffsetMO.getGlobal(), OffsetMO.getOffset(),
-                                    OffsetMO.getTargetFlags()) // Disp/offset
-                  .addReg(Register())
-                  .addReg(X86::R11B);
-
-            if (DestRegMO.isImm()) {
-                 BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R11B)
-                    .addImm(DestRegMO.getImm());
-            } else {
-                BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
-                    .addReg(DestRegMO.getReg());
-            }
-            
-            BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
-                .addReg(X86::R11B)
-                .addImm(0x0F); 
-
-            BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
-                .addReg(Register(X86::R11B));
-        
-            auto MIB = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B);
-            MIB.addReg(X86::R11B);
-            addOffset(MIB.addReg(BaseRegMO.getReg(), RegState::Kill),
-                      OffsetMO);
-
-            if (OffsetMO.isImm())
-              BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-                  .addReg(BaseRegMO.getReg()) // Base
-                  .addImm(1)                  // Scale
-                  .addReg(Register())         // Index
-                  .addImm(OffsetMO.getImm())  // Disp/offset
-                  .addReg(Register())         // Segment reg
-                  .addReg(X86::R11B);
-            else
-              BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-                  .addReg(BaseRegMO.getReg()) // Base
-                  .addImm(1)                  // Scale
-                  .addReg(Register())         // Index
-                  .addGlobalAddress(OffsetMO.getGlobal(), OffsetMO.getOffset(),
-                                    OffsetMO.getTargetFlags()) // Disp/offset
-                  .addReg(Register())                          // Segment reg
-                  .addReg(X86::R11B);
-
-            break;
-        }
-        case X86::MOV32mr:
-        case X86::MOV32mi:
-        {
-            auto& BaseRegMO = MI.getOperand(0);
-            auto& ScaleMO = MI.getOperand(1);
-            auto& IndexMO = MI.getOperand(2);
-            auto& OffsetMO = MI.getOperand(3);
-            auto& SegmentMO = MI.getOperand(4);
-            auto& DestRegMO = MI.getOperand(5);
-
-            // Insert insn to read the contents of destination address into R11
-            // mov32rm r11d, [baseregmo + offsetmo]
-            addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R11D)
-                          .addReg(BaseRegMO.getReg(), RegState::Kill),
-                      OffsetMO);
-
-            // Insert insn to move the secret data into the low 16bits of R11
-            if (DestRegMO.isImm()) {
-                // TODO: This needs to be checked to not truncate the value
-                 BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Register(X86::R11W))
-                    .addImm(DestRegMO.getImm());
-            } else {
-                Register fixedWidthDestReg = DestRegMO.getReg();
-                if (16 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
-                    // sub reg index 4 is 
-                    // each 32/64 bit gpr's word sized subregister
-                    fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 4);
-                }
-                BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Register(X86::R11W))
-                    .addReg(fixedWidthDestReg);
-            }
-
-            // Insert insn to bitwise not all of R11
-            BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
-                .addReg(Register(X86::R11));
-
-            // Insert insn to store R11, whose contents is NOT EQUAL to the
-            // contents of (BaseRegMO + OffsetMO) or DestRegMO
-            addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
-                          .addReg(BaseRegMO.getReg(), RegState::Kill),
-                      OffsetMO)
-                .addReg(X86::R11D);
-
-            // No need to insert the actual store of the sensitive data. All of
-            // the previously inserted insns are all inserted before the store
-            // of the sensitive data, so it's already there.
-            break;
-        }
-        case X86::MOV64mr:
-        case X86::MOV64mi32:
-        {
-            auto& BaseRegMO = MI.getOperand(0);
-            auto& ScaleMO = MI.getOperand(1);
-            auto& IndexMO = MI.getOperand(2);
-            auto& OffsetMO = MI.getOperand(3);
-            auto& SegmentMO = MI.getOperand(4);
-            auto& DestRegMO = MI.getOperand(5);
-
-            // Insert insn to read the contents of destination address into R11
-            if (DestRegMO.isReg()) {
-              addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11)
-                            .addReg(BaseRegMO.getReg(), RegState::Kill),
-                        OffsetMO);
-            }
-
-            // Insert insn to zero out the low 32 bits of r11d
-            BuildMI(MBB, MI, DL, TII->get(X86::AND32ri8), Register(X86::R11D))
-                .addReg(Register(X86::R11D))
-                .addImm(0);
-
-            // Insert insn to move the secret data into the low 8bits of R11
-            if (DestRegMO.isImm()) {
-                 BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), Register(X86::R11B))
-                    .addImm(DestRegMO.getImm());
-            } else {
-                auto SRIByte = TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AL));
-                auto SRIWord = TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AX));
-                auto SRIDouble = TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::EAX));
-                errs() << "SRIByte: " << SRIByte << '\n';
-                errs() << "SRIWord: " << SRIWord << '\n';
-                errs() << "SRIDouble: " << SRIDouble << '\n';
-                errs() << "Subregidx ax of eax: " 
-                       << TRI->getSubRegIndex(MCRegister(X86::EAX), MCRegister(X86::AX))
-                       << '\n';
-
-                Register fixedWidthDestReg = DestRegMO.getReg();
-                if (8 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
-                    // 1 should be the smallest, least significant subreg
-                    fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 1);
-                }
-                BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
-                    .addReg(fixedWidthDestReg);
-            }
-
-            // Insert insn to bitwise not all of R11
-            BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
-                .addReg(Register(X86::R11));
-
-            // Insert insn to store R11, whose contents is NOT EQUAL to the
-            // contents of (BaseRegMO + OffsetMO) or DestRegMO
-            addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
-                          .addReg(BaseRegMO.getReg(), RegState::Kill),
-                      OffsetMO)
-                .addReg(X86::R11);
-
-            // No need to insert the actual store of the sensitive data. All of
-            // the previously inserted insns are all inserted before the store
-            // of the sensitive data, so it's already there.
-            break;
-        }
-        default: 
-        {
-            errs() << "Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
-            OpcodeSupported = false;
-            // assert(false && "Unsupported opcode in X86SilentStoreHardening");
-            break;
-        }
+    if (DestRegMO.isImm()) {
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R11B)
+          .addImm(DestRegMO.getImm());
+    } else {
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+          .addReg(DestRegMO.getReg());
     }
 
-    if (OpcodeSupported) { // then it was instrumented
-        NumInstrumented += 1;
+    BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
+        .addReg(X86::R11B)
+        .addImm(0x0F);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
+        .addReg(Register(X86::R11B));
+
+    auto MIB = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B);
+    MIB.addReg(X86::R11B)
+        .addReg(BaseRegMO.getReg())
+        .add(ScaleMO)
+        .add(IndexMO)
+        .add(OffsetMO)
+        .add(SegmentMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+        .addReg(BaseRegMO.getReg()) // Base
+        .add(ScaleMO)               // Scale
+        .add(IndexMO)               // Index
+        .add(OffsetMO)              // Disp/offset
+        .add(SegmentMO)             // Segment reg
+        .addReg(X86::R11B);
+
+    break;
+  }
+  case X86::MOV32mr:
+  case X86::MOV32mi: {
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &DestRegMO = MI.getOperand(5);
+
+    // Insert insn to read the contents of destination address into R11
+    // mov32rm r11d, [baseregmo + offsetmo]
+    auto Load = BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R11D)
+                    .addReg(BaseRegMO.getReg())
+                    .add(ScaleMO) // Scale
+                    .add(IndexMO) // Index
+                    .add(OffsetMO)
+                    .add(SegmentMO);
+
+    // Insert insn to move the secret data into the low 16bits of R11
+    if (DestRegMO.isImm()) {
+      // TODO: This needs to be checked to not truncate the value
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Register(X86::R11W))
+          .addImm(DestRegMO.getImm());
+    } else {
+      Register fixedWidthDestReg = DestRegMO.getReg();
+      if (16 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
+        // sub reg index 4 is
+        // each 32/64 bit gpr's word sized subregister
+        fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 4);
+      }
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Register(X86::R11W))
+          .addReg(fixedWidthDestReg);
     }
+
+    // Insert insn to bitwise not all of R11
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
+        .addReg(Register(X86::R11));
+
+    // Insert insn to store R11, whose contents is NOT EQUAL to the
+    // contents of (BaseRegMO + OffsetMO) or DestRegMO
+    auto ProxyStore = BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+                          .addReg(BaseRegMO.getReg()) // Base
+                          .add(ScaleMO)               // Scale
+                          .add(IndexMO)               // Index
+                          .add(OffsetMO)              // Disp/offset
+                          .add(SegmentMO)             // Segment reg
+                          .addReg(X86::R11B);
+
+    // No need to insert the actual store of the sensitive data. All of
+    // the previously inserted insns are all inserted before the store
+    // of the sensitive data, so it's already there.
+    break;
+  }
+  case X86::MOV64mr:
+  case X86::MOV64mi32: {
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &DestRegMO = MI.getOperand(5);
+
+    // Insert insn to read the contents of destination address into R11
+    MachineInstr *MI2 =
+        addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11)
+                      .addReg(BaseRegMO.getReg()),
+                  OffsetMO);
+    // Insert insn to zero out the low 32 bits of r11d
+    BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), Register(X86::R11D))
+        .addReg(Register(X86::R11D))
+        .addImm(0);
+
+    // Insert insn to move the secret data into the low 8bits of R11
+    if (DestRegMO.isImm()) {
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), Register(X86::R11B))
+          .addImm(DestRegMO.getImm());
+    } else {
+      auto SRIByte =
+          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AL));
+      auto SRIWord =
+          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AX));
+      auto SRIDouble =
+          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::EAX));
+      //  MI.print(llvm::errs());
+      //  llvm::errs() << "\n";
+      //  errs() << "SRIByte: " << SRIByte << '\n';
+      //  errs() << "SRIWord: " << SRIWord << '\n';
+      //  errs() << "SRIDouble: " << SRIDouble << '\n';
+      //  errs() << "Subregidx ax of eax: "
+      //         << TRI->getSubRegIndex(MCRegister(X86::EAX),
+      //                                MCRegister(X86::AX))
+      //         << '\n';
+      Register fixedWidthDestReg = DestRegMO.getReg();
+      if (8 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
+        // 1 should be the smallest, least significant subreg
+        fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 1);
+      }
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
+          .addReg(fixedWidthDestReg);
+    }
+
+    // Insert insn to bitwise not all of R11
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
+        .addReg(Register(X86::R11));
+
+    // Insert insn to store R11, whose contents is NOT EQUAL to the
+    // contents of (BaseRegMO + OffsetMO) or DestRegMO
+    auto ProxyStore = BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+                          .addReg(BaseRegMO.getReg()) // Base
+                          .add(ScaleMO)               // Scale
+                          .add(IndexMO)               // Index
+                          .add(OffsetMO)              // Disp/offset
+                          .add(SegmentMO)             // Segment reg
+                          .addReg(X86::R11);
+
+    // No need to insert the actual store of the sensitive data. All of
+    // the previously inserted insns are all inserted before the store
+    // of the sensitive data, so it's already there.
+    break;
+  }
+  default: {
+    errs() << "Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
+    OpcodeSupported = false;
+    // assert(false && "Unsupported opcode in X86SilentStoreHardening");
+    break;
+  }
+  }
+
+  if (OpcodeSupported) { // then it was instrumented
+    NumInstrumented += 1;
+  }
 }
 
 bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) {
