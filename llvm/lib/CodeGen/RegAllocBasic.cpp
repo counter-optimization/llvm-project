@@ -266,7 +266,6 @@ MCRegister RABasic::selectOrSplit(LiveInterval &VirtReg,
   // Check for an available register in this class.
   auto Order =
       AllocationOrder::create(VirtReg.reg(), *VRM, RegClassInfo, Matrix);
-
   for (MCRegister PhysReg : Order) {
     assert(PhysReg.isValid());
     // Check for interference in PhysReg

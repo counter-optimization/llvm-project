@@ -2899,14 +2899,6 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   MF = &mf;
   TRI = MF->getSubtarget().getRegisterInfo();
   TII = MF->getSubtarget().getInstrInfo();
-
-  HS = &getAnalysis<HandlesSecretsWrapperPass>();
-  if (HS->functionHandlesSecrets()) {
-    auto ReservedRegs = TRI->getReservedRegs(mf);
-    auto r11b = MCRegister::from(247u);
-    TRI->markSuperRegs(ReservedRegs, r11b);
-  }
-
   RCI.runOnMachineFunction(mf);
 
   EnableAdvancedRASplitCost =
@@ -2929,10 +2921,18 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   SpillPlacer = &getAnalysis<SpillPlacement>();
   DebugVars = &getAnalysis<LiveDebugVariables>();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
-  
+  HS = &getAnalysis<HandlesSecretsWrapperPass>();
+
+  errs() << "In RegAllocGreedy, Function " << MF->getName() << " handles secrets?: ";
+  errs() << HS->functionHandlesSecrets() << '\n';
+
   initializeCSRCost();  
 
   RegCosts = TRI->getRegisterCosts(*MF);
+  uint32_t RegNo = 0;
+  // for (auto cost : RegCosts) {
+  //   errs() << "In RegAllocGreedy, RegNo " << RegNo++ << " has cost: " << cost << "\n";
+  // }
 
   VRAI = std::make_unique<VirtRegAuxInfo>(*MF, *LIS, *VRM, *Loops, *MBFI);
   SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM, *VRAI));
