@@ -138,6 +138,23 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(std::string Filename) 
     }
 }
 
+static Register getEqR10(Register EAX){
+    switch(EAX) {
+        case X86::RAX:
+            return X86::R10;
+        case X86::EAX:
+            return X86::R10D;
+        case X86::AX:
+            return X86::R10W;
+        case X86::AH:
+            return X86::R10BH;
+        case X86::AL:
+            return X86::R10B;
+        default:
+            return EAX;
+    }
+}
+
 bool X86_64SilentStoreMitigationPass::isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine &Line) {
     return Line.SilentStore;
 }
@@ -158,12 +175,6 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   case X86::MOV8mr:
   case X86::MOV8mi: {
     auto NumOperands = MI.getNumOperands();
-
-    // for (auto ii = 0; ii < NumOperands; ++ii) {
-    //     errs() << "Operand " << ii << " is " << MI.getOperand(ii) <<
-    //     '\n';
-    // }
-
     auto &BaseRegMO = MI.getOperand(0);
     auto &ScaleMO = MI.getOperand(1);
     auto &IndexMO = MI.getOperand(2);
@@ -171,60 +182,143 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     auto &SegmentMO = MI.getOperand(4);
     auto &DestRegMO = MI.getOperand(5);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm))
-        .addReg(X86::R11B)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO);
+    /* Handle EFLAGS
+     * mov r10 eax
+     * mov eax eflags
+     *
+     * mov eflags eax
+     * mov eax 10
+     *
+     * or
+     *
+     * blind move
+     * push eflags
+     * pop r10
+     *
+     * push r10
+     * pop eflags
+     * blind move
+     */
 
-    BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
-        .addReg(X86::R11B)
+    /* EFLAG hack 1
+     * MachineInstr *Push = BuildMI(MBB, MI, DL, TII->get(X86::PUSHF32));
+     * Push->getOperand(2).setIsUndef();
+     * Push->getOperand(3).setIsUndef();
+     */
+
+    // EFLAG hack 2
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(X86::RAX);
+    BuildMI(MBB, MI, DL, TII->get(X86::LAHF));
+
+    // TODO Use XCHG
+    // BuildMI(MBB, MI, DL,
+    // TII->get(X86::XCHG64rr)).addReg(X86::RAX).addReg(X86::R10).addReg(X86::RAX).addReg(X86::R10);
+
+    /* EFLAG hack 3
+     * MachineInstr *Push = BuildMI(MBB, MI, DL, TII->get(X86::PUSHF32));
+     * Push->getOperand(2).setIsUndef();
+     * Push->getOperand(3).setIsUndef();
+     * BuildMI(MBB, MI, DL, TII->get(X86::POP32r)).addReg(X86::R10D);
+     */
+
+    Register B, S, I, D;
+    if (BaseRegMO.isReg())
+      B = getEqR10(BaseRegMO.getReg());
+    if (DestRegMO.isReg())
+      D = getEqR10(DestRegMO.getReg());
+    if (SegmentMO.isReg())
+      S = getEqR10(SegmentMO.getReg());
+    if (IndexMO.isReg())
+      I = getEqR10(IndexMO.getReg());
+
+    auto MOV1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R11B)
+                    .addReg(B)
+                    .add(ScaleMO);
+    if (IndexMO.isReg())
+      MOV1.addReg(I);
+    else
+      MOV1.add(IndexMO);
+    MOV1.add(OffsetMO);
+    if (SegmentMO.isReg())
+      MOV1.addReg(S);
+    else
+      MOV1.add(SegmentMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), Register(X86::R11B))
+        .addUse(X86::R11B)
         .addImm(0xF0);
 
     BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
         .addReg(Register(X86::R11B));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::R11B);
+    auto MOV2 =
+        BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr)).addReg(B).add(ScaleMO);
+    if (IndexMO.isReg())
+      MOV2.addReg(I);
+    else
+      MOV2.add(IndexMO);
+    MOV2.add(OffsetMO);
+    if (SegmentMO.isReg())
+      MOV2.addReg(S);
+    else
+      MOV2.add(SegmentMO);
+    MOV2.addDef(X86::R11B);
 
     if (DestRegMO.isImm()) {
       BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R11B)
           .addImm(DestRegMO.getImm());
     } else {
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
-          .addReg(DestRegMO.getReg());
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(D);
     }
 
     BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
-        .addReg(X86::R11B)
+        .addUse(X86::R11B)
         .addImm(0x0F);
 
     BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
         .addReg(Register(X86::R11B));
 
-    auto MIB = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B);
-    MIB.addReg(X86::R11B)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO);
+    auto OR1 = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B)
+                   .addUse(X86::R11B)
+                   .addReg(B)
+                   .add(ScaleMO);
+    if (IndexMO.isReg())
+      OR1.addReg(I);
+    else
+      OR1.add(IndexMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-        .addReg(BaseRegMO.getReg()) // Base
-        .add(ScaleMO)               // Scale
-        .add(IndexMO)               // Index
-        .add(OffsetMO)              // Disp/offset
-        .add(SegmentMO)             // Segment reg
-        .addReg(X86::R11B);
+    OR1.add(OffsetMO);
+    if (SegmentMO.isReg())
+      OR1.addReg(S);
+    else
+      OR1.add(SegmentMO);
 
+    auto MOV3 = BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+                    .addReg(B)     // Base
+                    .add(ScaleMO); // Scale
+    if (IndexMO.isReg())
+      MOV3.addReg(I);
+    else
+      MOV3.add(IndexMO);
+
+    MOV3.add(OffsetMO); // Disp/offset
+    if (SegmentMO.isReg())
+      MOV3.addReg(S);
+    else
+      MOV3.add(SegmentMO);
+
+    MOV3.addReg(X86::R11B);
+
+    // TODO Use XCHG
+    // BuildMI(MBB, MI, DL,
+    // TII->get(X86::XCHG64rr),X86::RAX).addReg(X86::R10).addUse(X86::RAX).addUse(X86::R10);
+    BuildMI(MBB, MI, DL, TII->get(X86::SAHF));
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R10);
+
+    /* EFLAG hack 3
+     * BuildMI(MBB, MI, DL, TII->get(X86::PUSH32r)).addReg(X86::R10D);
+     * MachineInstr *Pop = BuildMI(MBB, MI, DL, TII->get(X86::POPF32));
+     */
     break;
   }
   case X86::MOV32mr:
@@ -236,6 +330,11 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     auto &SegmentMO = MI.getOperand(4);
     auto &DestRegMO = MI.getOperand(5);
 
+    // MachineInstr *MI2 =
+    //     addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R11D)
+    //                   .addReg(BaseRegMO.getReg()),
+    //               OffsetMO);
+
     // Insert insn to read the contents of destination address into R11
     // mov32rm r11d, [baseregmo + offsetmo]
     auto Load = BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R11D)
@@ -244,13 +343,14 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
                     .add(IndexMO) // Index
                     .add(OffsetMO)
                     .add(SegmentMO);
-
+ 
     // Insert insn to move the secret data into the low 16bits of R11
     if (DestRegMO.isImm()) {
       // TODO: This needs to be checked to not truncate the value
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Register(X86::R11W))
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), X86::R11W)
           .addImm(DestRegMO.getImm());
     } else {
+      assert(DestRegMO.isReg() && "must be reg");
       Register fixedWidthDestReg = DestRegMO.getReg();
       if (16 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
         // sub reg index 4 is
@@ -295,6 +395,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
                       .addReg(BaseRegMO.getReg()),
                   OffsetMO);
     // Insert insn to zero out the low 32 bits of r11d
+    // TODO: Use EFLAGS hack from MOV8
     BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), Register(X86::R11D))
         .addReg(Register(X86::R11D))
         .addImm(0);

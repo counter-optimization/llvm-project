@@ -622,6 +622,16 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // Reserved.set(X86::R10);
 
   Reserved.set(X86::R11);
+  Reserved.set(X86::R11B);
+  Reserved.set(X86::R11D);
+  Reserved.set(X86::R11W);
+
+  // We need to register R10 for silent store so that we can save and restrore the eflags
+  Reserved.set(X86::R10);
+  Reserved.set(X86::R10D);
+  Reserved.set(X86::R10W);
+  Reserved.set(X86::R10B);
+  Reserved.set(X86::R10BH);
   return Reserved;
 }
 
