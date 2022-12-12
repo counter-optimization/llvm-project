@@ -778,6 +778,98 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         .addReg(X86::XMM15);
     break;
   }
+  case X86::MOVDQUmr: {
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &DestRegMO = MI.getOperand(5);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM15)
+        .addReg(BaseRegMO.getReg())
+        .add(ScaleMO) // Scale
+        .add(IndexMO) // Index
+        .add(OffsetMO)
+        .add(SegmentMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+        .addImm(0xFFFFFFFFFFFFFF);
+    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+        .addReg(X86::R11);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+        .addImm(0x00000000000000);
+    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+        .addReg(X86::XMM14)
+        .addReg(X86::R11)
+        .addImm(1);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+        .addReg(X86::XMM15)
+        .addReg(X86::XMM14);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+        .addReg(X86::XMM14)
+        .addReg(X86::XMM14);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+        .addReg(Register(X86::XMM15))
+        .addReg(Register(X86::XMM14));
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
+        .add(BaseRegMO)
+        .add(ScaleMO)
+        .add(IndexMO)
+        .add(OffsetMO)
+        .add(SegmentMO)
+        .addReg(X86::XMM15);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrr), X86::XMM15).add(DestRegMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+        .addImm(0x00000000000000);
+    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+        .addReg(X86::R11);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+        .addImm(0xFFFFFFFFFFFFFF);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+        .addReg(X86::XMM14)
+        .addReg(X86::R11)
+        .addImm(1);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+        .addReg(X86::XMM15)
+        .addReg(X86::XMM14);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+        .addReg(X86::XMM14)
+        .addReg(X86::XMM14);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+        .addReg(Register(X86::XMM15))
+        .addReg(Register(X86::XMM14));
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM14)
+        .addReg(BaseRegMO.getReg())
+        .add(ScaleMO) // Scale
+        .add(IndexMO) // Index
+        .add(OffsetMO)
+        .add(SegmentMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
+        .addReg(X86::XMM15)
+        .addReg(X86::XMM14);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
+        .add(BaseRegMO)
+        .add(ScaleMO)
+        .add(IndexMO)
+        .add(OffsetMO)
+        .add(SegmentMO)
+        .addReg(X86::XMM15);
+    break;
+  }
   default: {
     errs() << "Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
     OpcodeSupported = false;
