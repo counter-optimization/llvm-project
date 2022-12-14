@@ -610,6 +610,10 @@ public:
     return Contents.OffsetedInfo.Val.SymbolName;
   }
 
+  void setSymbolName(const char * Sym) {
+    Contents.OffsetedInfo.Val.SymbolName = Sym;
+  }
+
   /// clobbersPhysReg - Returns true if this RegMask clobbers PhysReg.
   /// It is sometimes necessary to detach the register mask pointer from its
   /// machine operand. This static method can be used for such detached bit

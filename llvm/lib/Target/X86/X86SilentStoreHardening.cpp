@@ -1608,6 +1608,55 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         .addReg(X86::XMM15);
     break;
   }
+  case X86::INLINEASM:{
+    std::string Asm(MI.getOperand(0).getSymbolName());
+    std::vector<std::vector<std::string>> Insts;
+    std::vector<std::string> Inst;
+    std::string temp = "";
+    for (int i = 0; i < Asm.size(); i++) {
+      if (Asm[i] == '\n') {
+        Insts.push_back(Inst);
+        Inst.clear();
+        continue;
+      }
+      if (Asm[i] == ' ' && temp.empty()) {
+        continue;
+      }
+      if (Asm[i] == ' ' || Asm[i] == ',') {
+        Inst.push_back(temp);
+        temp.clear();
+        continue;
+      }
+      temp.push_back(Asm[i]);
+    }
+    temp = "";
+    bool Instrument = false;
+    for (auto Inst : Insts) {
+      if (false && Inst[0] == "movq" &&
+          Inst[2].find("(") != std::string::npos) {
+        Instrument = true;
+        temp += "movq " + Inst[2] + ", %r11 \n";
+        temp += "andl 0, %r11d \n";
+        temp += "movq " + Inst[1] + ", %r10 \n";
+        temp += "movb %r10b, %r11b \n";
+        temp += "notq %r11 \n";
+        temp += "movq %r11, " + Inst[2] + " \n";
+      }
+      temp += Inst[0];
+      for (int i = 1; i < Inst.size(); i++) {
+        temp.push_back(' ');
+        temp += Inst[i];
+        if (i == Inst.size() - 1)
+          temp.push_back(' ');
+        else
+          temp.push_back(',');
+      }
+      temp.push_back('\n');
+    }
+    if (Instrument)
+      MI.getOperand(0).setSymbolName(temp.c_str());
+    break;
+  }
   default: {
     errs() << "Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
     OpcodeSupported = false;
@@ -1622,11 +1671,11 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 }
 
 bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) {
-    if (!shouldRunOnMachineFunction(MF)) {
+    if (false && !shouldRunOnMachineFunction(MF)) {
         return false; // Doesn't modify the func if not running
     }
 
-    readCheckerAlertCSV("test_alert.csv");
+    // readCheckerAlertCSV("test_alert.csv");
 
     bool doesModifyFunction{false};
 

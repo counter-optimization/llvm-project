@@ -634,6 +634,7 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(X86::R10BH);
   
   Reserved.set(X86::XMM15);
+  Reserved.set(X86::XMM14);
   return Reserved;
 }
 
