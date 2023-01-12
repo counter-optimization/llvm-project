@@ -25,6 +25,10 @@
 
 using namespace llvm;
 
+static cl::opt<bool> EnableCompSimp("x86-cs",
+                        cl::desc("Enable the X86 comp simp mitigation."),
+                        cl::init(false));
+
 namespace {
 class X86_64CompSimpMitigationPass : public MachineFunctionPass {
 public:
@@ -1299,7 +1303,9 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
 }
 
 bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
-  // TODO: remove the short circuit for formal testing
+  if (!EnableCompSimp)
+      return false;
+  llvm::errs() << "[CompSimp]\n";
   if (!shouldRunOnMachineFunction(MF)) {
     return false; // Doesn't modify the func if not running
   }

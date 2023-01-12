@@ -27,6 +27,10 @@
 
 using namespace llvm;
 
+static cl::opt<bool> EnableSilentStore("x86-ss",
+                        cl::desc("Enable the X86 silent store mitigation."),
+                        cl::init(false));
+
 namespace {
 
 class X86_64SilentStoreMitigationPass : public MachineFunctionPass {
@@ -1671,11 +1675,14 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 }
 
 bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) {
-    if (false && !shouldRunOnMachineFunction(MF)) {
+    if (!EnableSilentStore)
+        return false;
+
+    if (!shouldRunOnMachineFunction(MF)) {
         return false; // Doesn't modify the func if not running
     }
 
-    // readCheckerAlertCSV("test_alert.csv");
+    readCheckerAlertCSV("test_alert.csv");
 
     bool doesModifyFunction{false};
 
