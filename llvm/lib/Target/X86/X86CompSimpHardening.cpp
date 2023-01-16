@@ -29,6 +29,10 @@ static cl::opt<bool> EnableCompSimp("x86-cs",
                         cl::desc("Enable the X86 comp simp mitigation."),
                         cl::init(false));
 
+static cl::opt<std::string> CompSimpCSVPath("x86-cs-csv-path",
+                        cl::desc("X86 comp simp csv path."),
+                        cl::init("test_alert.csv"));
+
 namespace {
 class X86_64CompSimpMitigationPass : public MachineFunctionPass {
 public:
@@ -763,36 +767,61 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(pow(2, 48));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W).addReg(Op2_16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op2_16).addImm(0xFFFF);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12).addReg(X86::RAX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::LAHF));
+
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R10)
       .addReg(X86::R10)
       .addImm(16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R11)
       .addReg(X86::R11)
       .addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op1.getReg())
-      .addReg(Op1.getReg())
+
+  Register Op1R = Op1.getReg();
+  Register Op2R = Op2.getReg();
+  if (Op1R == X86::RAX) 
+      Op1R = X86::R12;
+  if (Op2R == X86::RAX) 
+      Op2R = X86::R12;
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op1R)
+      .addReg(Op1R)
       .addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op2.getReg())
-      .addReg(Op2.getReg())
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op2R)
+      .addReg(Op2R)
       .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SAHF));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R12);
+
   BuildMI(*MBB, *MI, DL, TII->get(X86::ADD32rr), X86::R10D)
       .addReg(X86::R10D)
       .addReg(X86::R11D);
   BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), Op1.getReg())
       .addReg(Op1.getReg())
       .addReg(Op2.getReg());
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12).addReg(X86::RAX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::LAHF));
+
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R10)
       .addReg(X86::R10)
       .addImm(16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R11)
       .addReg(X86::R11)
       .addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Op1.getReg())
-      .addReg(Op1.getReg())
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Op1R)
+      .addReg(Op1R)
       .addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Op2.getReg())
-      .addReg(Op2.getReg())
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Op2R)
+      .addReg(Op2R)
       .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SAHF));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R12);
+
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1_16).addReg(X86::R10W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2_16).addReg(X86::R11W);
 }
@@ -1294,7 +1323,6 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
   }
   case X86::ADD64rr: {
     // TODO: check for EFLAG failures
-    break;
     insertSafeAdd64Before(MI);
     MI->eraseFromParent();
     break;

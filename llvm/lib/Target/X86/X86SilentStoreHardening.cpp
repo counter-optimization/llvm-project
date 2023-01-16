@@ -31,6 +31,10 @@ static cl::opt<bool> EnableSilentStore("x86-ss",
                         cl::desc("Enable the X86 silent store mitigation."),
                         cl::init(false));
 
+static cl::opt<std::string> SilentStoreCSVPath("x86-ss-csv-path",
+                        cl::desc("X86 silent store csv path."),
+                        cl::init("test_alert.csv"));
+
 namespace {
 
 class X86_64SilentStoreMitigationPass : public MachineFunctionPass {
@@ -1678,11 +1682,12 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     if (!EnableSilentStore)
         return false;
 
+    llvm::errs() << "[SilentStore]\n";
     if (!shouldRunOnMachineFunction(MF)) {
         return false; // Doesn't modify the func if not running
     }
 
-    readCheckerAlertCSV("test_alert.csv");
+    readCheckerAlertCSV(SilentStoreCSVPath);
 
     bool doesModifyFunction{false};
 
