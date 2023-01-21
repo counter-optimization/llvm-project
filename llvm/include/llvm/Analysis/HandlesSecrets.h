@@ -1,6 +1,9 @@
 #ifndef LLVM_ANALYSIS_HANDLESSECRETS_H
 #define LLVM_ANALYSIS_HANDLESSECRETS_H
 
+#include <fstream>
+#include <string>
+
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/IR/Function.h"
@@ -33,6 +36,8 @@ public:
 
 class HandlesSecretsWrapperPass : public FunctionPass {
     bool FunctionHandlesSecrets{false};
+
+  std::string SecretsFileName = "ciocc.secrets.csv";
 
 public:
     static char ID;
