@@ -83,7 +83,8 @@ void HandlesSecretsWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool HandlesSecretsWrapperPass::runOnFunction(Function &F) {
-    std::string FuncSecretsFileName(F.getName());
+    std::string FuncName(F.getName());
+    std::string FuncSecretsFileName(FuncName);
     FuncSecretsFileName.append(".");
     FuncSecretsFileName.append(this->SecretsFileName);
     std::fstream SecretsFile(FuncSecretsFileName, std::ios::ate | std::ios::out);
@@ -94,7 +95,7 @@ bool HandlesSecretsWrapperPass::runOnFunction(Function &F) {
     int ArgIdx = 0;
     for (auto& Arg : F.args()) {
         if (Arg.hasAttribute(Attribute::Secret)) {
-	    SecretsFile << F.getName() << ',' << ArgIdx << '\n';
+	    SecretsFile << FuncName << ',' << ArgIdx << '\n';
             this->FunctionHandlesSecrets |= true;
         }
 	++ArgIdx;
