@@ -94,7 +94,7 @@ bool HandlesSecretsWrapperPass::runOnFunction(Function &F) {
     int ArgIdx = 0;
     for (auto& Arg : F.args()) {
         if (Arg.hasAttribute(Attribute::Secret)) {
-	    SecretsFile << FuncName << ',' << ArgIdx << '\n';
+	    SecretsFile << F.getName() << ',' << ArgIdx << '\n';
             this->FunctionHandlesSecrets |= true;
         }
 	++ArgIdx;
