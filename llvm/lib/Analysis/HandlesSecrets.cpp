@@ -83,12 +83,13 @@ void HandlesSecretsWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool HandlesSecretsWrapperPass::runOnFunction(Function &F) {
-    std::fstream SecretsFile(this->SecretsFileName, std::ios::ate | std::ios::out);
+    std::string FuncSecretsFileName(F.getName());
+    FuncSecretsFileName.append(".");
+    FuncSecretsFileName.append(this->SecretsFileName);
+    std::fstream SecretsFile(FuncSecretsFileName, std::ios::ate | std::ios::out);
 
     assert(SecretsFile.is_open() &&
 	   "Couldn't open secrets csv file for write in HandlesSecretsWrapperPass");
-
-    std::string FuncName(F.getName());
 
     int ArgIdx = 0;
     for (auto& Arg : F.args()) {
