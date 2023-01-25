@@ -633,6 +633,18 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(X86::R10B);
   Reserved.set(X86::R10BH);
   
+  // We need these for shift
+  // Reserved.set(X86::R12);
+  // Reserved.set(X86::R12D);
+  // Reserved.set(X86::R12W);
+  // Reserved.set(X86::R12B);
+  // Reserved.set(X86::R12BH);
+
+  // Reserved.set(X86::R13);
+  // Reserved.set(X86::R13B);
+  // Reserved.set(X86::R13D);
+  // Reserved.set(X86::R13W);
+
   Reserved.set(X86::XMM15);
   Reserved.set(X86::XMM14);
   return Reserved;
