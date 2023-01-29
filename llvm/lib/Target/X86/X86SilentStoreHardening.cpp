@@ -60,13 +60,10 @@ public:
 private:
     /* The number of instructions coming before this instruction.
      * This is 0 for the first instruction of the function, 1 for the
-     * next insn, ...
-     */
+     * next insn, ... */
     size_t InstructionIdx = 0;
 
-    /* Number of instructions instrumented so far. This should match
-     * the number of alerts in the csv file from the checker.
-     */
+    /* Number of instructions instrumented so far. */
     size_t NumInstrumented = 0;
 
     std::vector<size_t> IndicesToInstrument;
@@ -76,37 +73,94 @@ private:
         MachineFunction& MF);
 
     struct CheckerAlertCSVLine {
-        bool SilentStore;
-        bool CompSimp;
-        bool Dmp;
-        size_t InsnIdx;
+	std::string SubName;
+        bool IsSilentStore;
+        bool IsCompSimp;
+        int InsnIdx;
 
         CheckerAlertCSVLine(std::string Line) {
             std::istringstream StrReader(Line);
 
-            constexpr size_t NumCols = 4;
-            std::array<unsigned int, NumCols> Cols;
-            char ColChars[512] = {0};
-            size_t ColsRead = 0;
+	    // The row so far
+            constexpr int NumCols = 12;
+            std::vector<std::string> Cols;
+	    Cols.reserve(NumCols);
 
-            while (StrReader.getline(ColChars, 512, ',')) {
-                unsigned int CurColValue = std::stoul(std::string(ColChars));
-                Cols[ColsRead++] = CurColValue;
-            }
+	    // Parser state
+	    int ColsRead = 0;
+	    std::vector<char> ColChars;
+	    bool InQuotedString = false;
+	    char CurChar;
+	    bool LineEnded = false;
 
-            assert(ColsRead == NumCols && "Checker alert CSV col header mismatch.");
+	    while (!LineEnded) {
+		CurChar = StrReader.get();
+		
+		if (!StrReader.good()) {
+		    if (StrReader.eof()) {
+			assert(NumCols == ColsRead &&
+			       "Error reading checker alert CSV file, EOF in middle of CSV row");
+			break;
+		    } else if (StrReader.fail() || StrReader.bad()) {
+			assert(false && "Error reading checker alert CSV file, str read failed");
+		    }
+		}
 
-            SilentStore = Cols[0] == 1UL;
-            CompSimp = Cols[1] == 1UL;
-            Dmp = Cols[2] == 1UL;
-            InsnIdx = Cols[3];
+		switch (CurChar) {
+		case '"':
+		    InQuotedString = !InQuotedString;
+		    break;
+		case '\n':
+		case ',':
+		    if (InQuotedString) {
+			ColChars.push_back(CurChar);
+		    } else {
+			++ColsRead;
+			Cols.emplace_back(ColChars.data());
+			ColChars.clear();
+			if (CurChar == '\n') {
+			    LineEnded = true;
+			}
+		    }
+		    break;
+		default:
+		    ColChars.push_back(CurChar);
+		    break;
+		}
+	    }
+
+	    assert(NumCols == ColsRead && "Checker alert CSV col header mismatch.");
+
+	    constexpr int SubNameColIdx = 0;
+	    constexpr int InsnIdxColIdx = 3;
+	    constexpr int AlertReasonColIdx = 10;
+
+	    // parse: is this a cs alert or ss alert?
+	    std::string& AlertReason = Cols.at(AlertReasonColIdx);
+	    if (AlertReason == "comp-simp") {
+		this->IsCompSimp = true;
+	    }
+
+	    if (AlertReason == "silent-stores") {
+		this->IsSilentStore = true;
+	    }
+
+	    // Parse insn idx
+	    std::string& InsnIdxStr = Cols.at(InsnIdxColIdx);
+	    this->InsnIdx = std::stoi(InsnIdxStr);
+
+	    // parse fn name
+	    this->SubName = std::move(Cols.at(SubNameColIdx));
+
+	    errs() << "Csv parser parsed row: (" << this->SubName << ", " <<
+		(this->IsCompSimp ? "cs" : "ss") << ", " << this->InsnIdx << ")\n";
         }
     };
 
     std::vector<CheckerAlertCSVLine> RelevantCSVLines;
 
     void readCheckerAlertCSV(std::string Filename);
-    bool isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine &Line);
+    bool isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine& Line);
 };
 } // end anonymous namespace 
 
@@ -122,18 +176,30 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(std::string Filename) 
         assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
     }
 
-    constexpr size_t MaxLineSize = 512; // 512 chars should be more than enough
-    char Line[MaxLineSize] = {0};
-    std::string ExpectedHeader("harden_silentstore,harden_compsimp,harden_dmp,insn_idx");
+    constexpr size_t MaxLineSize = 1024;
+    std::array<char, MaxLineSize> Line = {0};
+    std::string ExpectedHeader("subroutine_name,"
+			       "mir_opcode,"
+			       "addr,"
+			       "rpo_idx,"
+			       "tid,"
+			       "problematic_operands,"
+			       "left_operand,"
+			       "right_operand,"
+			       "live_flags,"
+			       "is_live,"
+			       "alert_reason,"
+			       "description");
     bool IsHeader = true;
 
     // operator bool() on the returned this* from .getline returns 
     // false. i think it returns false when EOF is hit? 
-    while (IFS.getline(Line, MaxLineSize)) {
-        std::string CurrentLine(Line);
+    while (IFS.getline(Line.data(), MaxLineSize)) {
+        std::string CurrentLine(Line.data());
 
         if (IsHeader) {
-            assert(ExpectedHeader == CurrentLine && "Unexpected header in checker alert csv file");
+            assert(ExpectedHeader == CurrentLine &&
+		   "Unexpected header in checker alert csv file");
             IsHeader = false;
         } else {
             CheckerAlertCSVLine CSVLine(CurrentLine);
@@ -143,6 +209,8 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(std::string Filename) 
                 IndicesToInstrument.push_back(CSVLine.InsnIdx);
             }
         }
+
+	Line.fill(0);
     }
 }
 
@@ -164,7 +232,7 @@ static Register getEqR10(Register EAX){
 }
 
 bool X86_64SilentStoreMitigationPass::isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine &Line) {
-    return Line.SilentStore;
+    return Line.IsSilentStore;
 }
 
 void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
@@ -1683,20 +1751,21 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
         return false;
 
     llvm::errs() << "[SilentStore]\n";
-    if (!shouldRunOnMachineFunction(MF)) {
-        return false; // Doesn't modify the func if not running
-    }
 
     readCheckerAlertCSV(SilentStoreCSVPath);
 
-    bool doesModifyFunction{false};
+    bool doesModifyFunction = false;
+    
+    if (!shouldRunOnMachineFunction(MF)) {
+        return doesModifyFunction;
+    }
 
     for (auto& MBB : MF) {
         for (auto& MI : MBB) {
             // Don't harden frame setup stuff like `push rbp`
             if (MI.mayStore() && !MI.getFlag(MachineInstr::MIFlag::FrameSetup)) {
                 doX86SilentStoreHardening(MI, MBB, MF);
-                doesModifyFunction = true; // Modifies the func if it does run
+                doesModifyFunction = true;
             }
 
             InstructionIdx += 1;
