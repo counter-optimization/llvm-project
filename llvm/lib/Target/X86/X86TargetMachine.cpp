@@ -57,6 +57,14 @@ static cl::opt<bool> EnableMachineCombinerPass("x86-machine-combiner",
                                cl::desc("Enable the machine combiner pass"),
                                cl::init(true), cl::Hidden);
 
+static cl::opt<bool> SSCSOrder("x86-ss-cs",
+                               cl::desc("SS and then CS pass"),
+                               cl::init(false), cl::Hidden);
+
+static cl::opt<bool> CSSSOrder("x86-cs-ss",
+                               cl::desc("CS and then SS pass"),
+                               cl::init(false), cl::Hidden);
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   // Register the target.
   RegisterTargetMachine<X86TargetMachine> X(getTheX86_32Target());
@@ -605,8 +613,17 @@ void X86PassConfig::addPreEmitPass2() {
              M->getFunction("objc_unsafeClaimAutoreleasedReturnValue");
     }));
 
-  addPass(createX86_64SilentStoreMitigationPass());
-  addPass(createX86_64CompSimpMitigationPass());
+  if (SSCSOrder) {
+    addPass(createX86_64SilentStoreMitigationPass());
+    addPass(createX86_64CompSimpMitigationPass());
+  } else if (CSSSOrder) {
+    addPass(createX86_64CompSimpMitigationPass());
+    addPass(createX86_64SilentStoreMitigationPass());
+  } else {
+    addPass(createX86_64SilentStoreMitigationPass());
+    addPass(createX86_64CompSimpMitigationPass());
+  }
+
   // addPass(createX86MachineInstrPrinterPass());
 }
 
