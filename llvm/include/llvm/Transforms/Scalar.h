@@ -81,6 +81,8 @@ FunctionPass *createCallSiteSplittingPass();
 //
 FunctionPass *createAggressiveDCEPass();
 
+ModulePass *createInsertScratchGlobalsPass();
+
 //===----------------------------------------------------------------------===//
 //
 // GuardWidening - An optimization over the @llvm.experimental.guard intrinsic

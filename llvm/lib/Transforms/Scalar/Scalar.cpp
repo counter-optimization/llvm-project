@@ -33,6 +33,7 @@ using namespace llvm;
 /// initializeScalarOptsPasses - Initialize all passes linked into the
 /// ScalarOpts library.
 void llvm::initializeScalarOpts(PassRegistry &Registry) {
+  initializeInsertScratchGlobalsLegacyPassPass(Registry);
   initializeADCELegacyPassPass(Registry);
   initializeAnnotationRemarksLegacyPass(Registry);
   initializeBDCELegacyPassPass(Registry);
@@ -128,6 +129,10 @@ void LLVMInitializeScalarOpts(LLVMPassRegistryRef R) {
 
 void LLVMAddAggressiveDCEPass(LLVMPassManagerRef PM) {
   unwrap(PM)->add(createAggressiveDCEPass());
+}
+
+void LLVMAddInsertScratchGlobalsPass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createInsertScratchGlobalsPass());
 }
 
 void LLVMAddDCEPass(LLVMPassManagerRef PM) {
