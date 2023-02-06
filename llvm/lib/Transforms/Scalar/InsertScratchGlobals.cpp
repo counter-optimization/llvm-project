@@ -9,6 +9,7 @@
 
 #include "llvm/Transforms/Scalar/InsertScratchGlobals.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
@@ -24,7 +25,10 @@ using namespace llvm;
 
 static cl::opt<bool> EnableGlobalScratch("global-scratch", cl::init(false),
                                          cl::Hidden);
-static cl::opt<int> SSize("gs-size", cl::init(50), cl::Hidden);
+// TODO: This flag is not available in the x86 pass, why?
+// Not required now as we are trying to search this global
+// by its name instead of creating a new one
+static cl::opt<int> SSize("gs-size", cl::init(100), cl::Hidden);
 
 namespace {
 
@@ -33,19 +37,32 @@ class InsertScratchGlobals {
 
 public:
   InsertScratchGlobals(Module &F) : F(F) {}
+  bool insertFuncDecl();
   bool run();
 };
 
 } // end anonymous namespace
 
+bool InsertScratchGlobals::insertFuncDecl() {
+  Type *I32 = Type::getInt32Ty(F.getContext());
+  Type *Void = Type::getVoidTy(F.getContext());
+  F.getOrInsertFunction("updateStats", Void, I32);
+}
+
 bool InsertScratchGlobals::run() {
+  if (!EnableGlobalScratch) {
+    return false;
+  }
   Type *I32 = Type::getInt32Ty(F.getContext());
   Type *ArrI32 = ArrayType::get(I32, SSize);
   auto *Init = ConstantAggregateZero::get(ArrI32);
   GlobalVariable *Scratch =
-      new GlobalVariable(F, ArrI32, false, GlobalValue::WeakODRLinkage, Init);
+      new GlobalVariable(F, ArrI32, false, GlobalValue::WeakAnyLinkage, Init);
+  Scratch->getType()->print(llvm::errs());
+  Scratch->getValueType()->print(llvm::errs());
   Scratch->setAlignment(Align(16));
   Scratch->setName("llvm_stats");
+  Scratch->dump();
   return false;
 }
 
@@ -66,8 +83,8 @@ struct InsertScratchGlobalsLegacyPass : public ModulePass {
   }
 
   bool runOnModule(Module &F) override {
-    if (skipModule(F))
-      return false;
+    //  if (skipModule(F))
+    //    return false;
     return InsertScratchGlobals(F).run();
   }
 
