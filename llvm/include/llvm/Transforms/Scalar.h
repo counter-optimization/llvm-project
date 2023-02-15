@@ -81,6 +81,7 @@ FunctionPass *createCallSiteSplittingPass();
 //
 FunctionPass *createAggressiveDCEPass();
 
+ModulePass *createInsertCompSimpTestFunctionsPass();
 ModulePass *createInsertScratchGlobalsPass();
 
 //===----------------------------------------------------------------------===//

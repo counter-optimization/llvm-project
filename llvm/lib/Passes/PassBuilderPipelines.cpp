@@ -70,6 +70,7 @@
 #include "llvm/Transforms/Instrumentation/InstrProfiling.h"
 #include "llvm/Transforms/Instrumentation/MemProfiler.h"
 #include "llvm/Transforms/Instrumentation/PGOInstrumentation.h"
+#include "llvm/Transforms/Scalar/InsertCompSimpTestFunctions.h"
 #include "llvm/Transforms/Scalar/InsertScratchGlobals.h"
 #include "llvm/Transforms/Scalar/ADCE.h"
 #include "llvm/Transforms/Scalar/AlignmentFromAssumptions.h"
@@ -1290,6 +1291,7 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
   if (LTOPreLink)
     addRequiredLTOPreLinkPasses(MPM);
 
+  MPM.addPass(InsertCompSimpTestFunctionsPass());
   MPM.addPass(InsertScratchGlobalsPass());
   return MPM;
 }
@@ -1788,6 +1790,7 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
 
   MPM.addPass(createModuleToFunctionPassAdaptor(AnnotationRemarksPass()));
 
+  MPM.addPass(InsertCompSimpTestFunctionsPass());
   MPM.addPass(InsertScratchGlobalsPass());
   return MPM;
 }
