@@ -1,6 +1,11 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <cassert>
+#include <algorithm>
+#include <vector>
+#include <set>
+#include <map>
 
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "X86FrameLowering.h"
@@ -46,7 +51,7 @@ public:
 
     bool runOnMachineFunction(MachineFunction &MF) override;
 
-    bool shouldRunOnMachineFunction(MachineFunction &MF);
+    bool shouldRunOnMachineFunction(const MachineFunction& MF);
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
         MachineFunctionPass::getAnalysisUsage(AU);
@@ -57,34 +62,46 @@ public:
         return "Silent stores mitigations";
     }
 
+    bool shouldRunOnInstructionIdx(const std::string& SubName) const {
+	auto FoundIter = this->IndicesToInstrument.find(SubName);
+	bool SubRequiresInstrumenting = FoundIter != this->IndicesToInstrument.end();
+	assert(SubRequiresInstrumenting &&
+	       "Trying to instrument sub that doesn't require instrumenting (not in flagged CSV records)");
+
+	const std::set<int>& Indices = FoundIter->second;
+	auto IndicesIter = Indices.find(this->InstructionIdx);
+	bool IdxRequiresInstrumenting = IndicesIter != Indices.end();
+	
+	return IdxRequiresInstrumenting;
+    }
+
 private:
     /* The number of instructions coming before this instruction.
      * This is 0 for the first instruction of the function, 1 for the
      * next insn, ... */
-    size_t InstructionIdx = 0;
+    int InstructionIdx{};
 
     /* Number of instructions instrumented so far. */
-    size_t NumInstrumented = 0;
+    int NumInstrumented{};
 
-    std::vector<size_t> IndicesToInstrument;
+    std::map<std::string, std::set<int>> IndicesToInstrument{};
 
     void doX86SilentStoreHardening(MachineInstr& MI,
         MachineBasicBlock& MBB,
         MachineFunction& MF);
 
     struct CheckerAlertCSVLine {
-	std::string SubName;
-        bool IsSilentStore;
-        bool IsCompSimp;
-        int InsnIdx;
+	std::string SubName{};
+        bool IsSilentStore{};
+        bool IsCompSimp{};
+        int InsnIdx{};
 
-        CheckerAlertCSVLine(std::string Line) {
+        explicit CheckerAlertCSVLine(const std::string& Line) {
             std::istringstream StrReader(Line);
 
 	    // The row so far
             constexpr int NumCols = 12;
-            std::vector<std::string> Cols;
-	    Cols.reserve(NumCols);
+            std::vector<std::string> Cols(12);
 
 	    // Parser state
 	    int ColsRead = 0;
@@ -136,7 +153,7 @@ private:
 	    constexpr int AlertReasonColIdx = 10;
 
 	    // parse: is this a cs alert or ss alert?
-	    std::string& AlertReason = Cols.at(AlertReasonColIdx);
+	    const std::string& AlertReason = Cols.at(AlertReasonColIdx);
 	    if (AlertReason == "comp-simp") {
 		this->IsCompSimp = true;
 	    }
@@ -146,29 +163,30 @@ private:
 	    }
 
 	    // Parse insn idx
-	    std::string& InsnIdxStr = Cols.at(InsnIdxColIdx);
+	    const std::string& InsnIdxStr = Cols.at(InsnIdxColIdx);
 	    this->InsnIdx = std::stoi(InsnIdxStr);
 
 	    // parse fn name
-	    this->SubName = std::move(Cols.at(SubNameColIdx));
+	    this->SubName = Cols.at(SubNameColIdx);
 
 	    errs() << "Csv parser parsed row: (" << this->SubName << ", " <<
 		(this->IsCompSimp ? "cs" : "ss") << ", " << this->InsnIdx << ")\n";
         }
     };
 
-    std::vector<CheckerAlertCSVLine> RelevantCSVLines;
+    std::vector<CheckerAlertCSVLine> RelevantCSVLines{};
 
-    void readCheckerAlertCSV(std::string Filename);
-    bool isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine& Line);
+    void readCheckerAlertCSV(const std::string& Filename);
+    bool isRelevantCheckerAlertCSVLine(const CheckerAlertCSVLine& Line);
 };
+    
 } // end anonymous namespace 
 
 /*
  * The CSV file has the following header:
  * harden_silentstore,harden_compsimp,harden_dmp,insn_idx
  */
-void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(std::string Filename) {
+void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Filename) {
     std::ifstream IFS(Filename);
 
     if (!IFS.is_open()) {
@@ -177,7 +195,7 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(std::string Filename) 
     }
 
     constexpr size_t MaxLineSize = 1024;
-    std::array<char, MaxLineSize> Line = {0};
+    std::array<char, MaxLineSize> Line{0};
     std::string ExpectedHeader("subroutine_name,"
 			       "mir_opcode,"
 			       "addr,"
@@ -193,8 +211,9 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(std::string Filename) 
     bool IsHeader = true;
 
     // operator bool() on the returned this* from .getline returns 
-    // false. i think it returns false when EOF is hit? 
-    while (IFS.getline(Line.data(), MaxLineSize)) {
+    // false. i think it returns false when EOF is hit?
+    // -1 for null terminator
+    while (IFS.getline(Line.data(), MaxLineSize - 1)) {
         std::string CurrentLine(Line.data());
 
         if (IsHeader) {
@@ -204,13 +223,36 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(std::string Filename) 
         } else {
             CheckerAlertCSVLine CSVLine(CurrentLine);
 
-            if (isRelevantCheckerAlertCSVLine(CSVLine)) {
-                RelevantCSVLines.push_back(CSVLine);
-                IndicesToInstrument.push_back(CSVLine.InsnIdx);
+            if (this->isRelevantCheckerAlertCSVLine(CSVLine)) {
+                this->RelevantCSVLines.push_back(CSVLine);
+		
+		const std::string& SubName = CSVLine.SubName;
+		int InsnIdx = CSVLine.InsnIdx;
+
+		auto Iter = this->IndicesToInstrument.find(SubName);
+		if (Iter == this->IndicesToInstrument.end()) {
+		    std::set<int> FreshSet{};
+		    FreshSet.insert(InsnIdx);
+		    this->IndicesToInstrument[SubName] = FreshSet;
+		} else {
+		    std::set<int>& Indices = Iter->second;
+		    Indices.insert(InsnIdx);
+		}
             }
         }
 
 	Line.fill(0);
+    }
+
+    // For debugging
+    errs() << "Done parsing checker alerts csv file:\n";
+    for (const auto& SubIndices : this->IndicesToInstrument) {
+	const std::string& SubName = SubIndices.first;
+	const std::set<int>& Indices = SubIndices.second;
+
+	for (int Idx : Indices) {
+	    errs() << SubName << ", " << Idx << '\n';
+	}
     }
 }
 
@@ -231,7 +273,7 @@ static Register getEqR10(Register EAX){
     }
 }
 
-bool X86_64SilentStoreMitigationPass::isRelevantCheckerAlertCSVLine(CheckerAlertCSVLine &Line) {
+bool X86_64SilentStoreMitigationPass::isRelevantCheckerAlertCSVLine(const CheckerAlertCSVLine &Line) {
     return Line.IsSilentStore;
 }
 
@@ -1752,23 +1794,30 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 
     llvm::errs() << "[SilentStore]\n";
 
-    readCheckerAlertCSV(SilentStoreCSVPath);
+    this->readCheckerAlertCSV(SilentStoreCSVPath);
 
     bool doesModifyFunction = false;
     
-    if (!shouldRunOnMachineFunction(MF)) {
+    if (!this->shouldRunOnMachineFunction(MF)) {
         return doesModifyFunction;
     }
+
+    std::string SubName = MF.getName().str();
 
     for (auto& MBB : MF) {
         for (auto& MI : MBB) {
             // Don't harden frame setup stuff like `push rbp`
-            if (MI.mayStore() && !MI.getFlag(MachineInstr::MIFlag::FrameSetup)) {
-                doX86SilentStoreHardening(MI, MBB, MF);
+	    // useful for debugging, keep around
+            // if (MI.mayStore()) {
+            //     this->doX86SilentStoreHardening(MI, MBB, MF);
+            //     doesModifyFunction = true;
+            // }
+	    if (this->shouldRunOnInstructionIdx(SubName)) {
+	        this->doX86SilentStoreHardening(MI, MBB, MF);
                 doesModifyFunction = true;
-            }
+	    }
 
-            InstructionIdx += 1;
+            this->InstructionIdx += 1;
         }
         // errs() << MBB << '\n';
     }
@@ -1776,19 +1825,33 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     return doesModifyFunction;
 }
 
-// This will eventually check for the secret attribute. For now, just use function names.
-bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(MachineFunction& MF) {
-    Function& F = MF.getFunction();
+bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(const MachineFunction& MF) {
+    const StringRef FuncName = MF.getName();
 
-    for (auto& Arg : F.args()) {
-        if (Arg.hasAttribute(Attribute::Secret)) {
-            return true;
-        }
-    }
+    auto IsFlaggedFunc = [&FuncName](const CheckerAlertCSVLine& CsvLine) {
+	const std::string& FlaggedName = CsvLine.SubName;
+	return FuncName.equals(FlaggedName);
+    };
 
-    return false;
+    auto Iter = std::find_if(this->RelevantCSVLines.begin(), this->RelevantCSVLines.end(), IsFlaggedFunc);
+
+    bool FoundFlaggedFuncSameName = Iter != this->RelevantCSVLines.end();
+    
+    return FoundFlaggedFuncSameName;
 }
 
+// Useful for debugging passes, keep around.
+// bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(const MachineFunction& MF) {
+//     const Function& F = MF.getFunction();
+
+//     for (auto& Arg : F.args()) {
+//         if (Arg.hasAttribute(Attribute::Secret)) {
+//             return true;
+//         }
+//     }
+
+//     return false;
+// }
 
 char X86_64SilentStoreMitigationPass::ID = 0;
 
