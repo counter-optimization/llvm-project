@@ -92,6 +92,7 @@ private:
 
     struct CheckerAlertCSVLine {
 	std::string SubName{};
+	std::string OpcodeName{};
         bool IsSilentStore{};
         bool IsCompSimp{};
         int InsnIdx{};
@@ -101,27 +102,18 @@ private:
 
 	    // The row so far
             constexpr int NumCols = 12;
-            std::vector<std::string> Cols(12);
+            std::vector<std::string> Cols{};
 
 	    // Parser state
 	    int ColsRead = 0;
 	    std::vector<char> ColChars;
 	    bool InQuotedString = false;
-	    char CurChar;
+	    char CurChar{};
 	    bool LineEnded = false;
+	    std::string Col{};
 
 	    while (!LineEnded) {
 		CurChar = StrReader.get();
-		
-		if (!StrReader.good()) {
-		    if (StrReader.eof()) {
-			assert(NumCols == ColsRead &&
-			       "Error reading checker alert CSV file, EOF in middle of CSV row");
-			break;
-		    } else if (StrReader.fail() || StrReader.bad()) {
-			assert(false && "Error reading checker alert CSV file, str read failed");
-		    }
-		}
 
 		switch (CurChar) {
 		case '"':
@@ -129,13 +121,22 @@ private:
 		    break;
 		case '\n':
 		case ',':
+		case -1:
 		    if (InQuotedString) {
 			ColChars.push_back(CurChar);
 		    } else {
 			++ColsRead;
-			Cols.emplace_back(ColChars.data());
+
+			if (ColChars.size() == 0) {
+			    Col = std::string("");
+			} else {
+			    Col = std::string(ColChars.begin(), ColChars.end());
+			}
+			
 			ColChars.clear();
-			if (CurChar == '\n') {
+			Cols.push_back(Col);
+			
+			if (CurChar == '\n' || CurChar == -1) {
 			    LineEnded = true;
 			}
 		    }
@@ -144,15 +145,36 @@ private:
 		    ColChars.push_back(CurChar);
 		    break;
 		}
+
+		if (!StrReader.good()) {
+		    if (StrReader.eof()) {
+			assert(NumCols == ColsRead && LineEnded &&
+			       "Error reading checker alert CSV file, EOF in middle of CSV row");
+			break;
+		    } else if (StrReader.fail() || StrReader.bad()) {
+			assert(false && "Error reading checker alert CSV file, str read failed");
+		    }
+		}
+
+		// errs() << "Col chars so far are:\n";
+		// for (char Char : ColChars) {
+		//     errs() << Char;
+		// }
+		// errs() << '\n';
 	    }
 
 	    assert(NumCols == ColsRead && "Checker alert CSV col header mismatch.");
 
 	    constexpr int SubNameColIdx = 0;
+	    constexpr int OpcodeNameColIdx = 1;
 	    constexpr int InsnIdxColIdx = 3;
 	    constexpr int AlertReasonColIdx = 10;
 
-	    // parse: is this a cs alert or ss alert?
+	    // Parse LLVM MIR opcode name (only used for debugging)
+	    const std::string& OpcodeName = Cols.at(OpcodeNameColIdx);
+	    this->OpcodeName = OpcodeName;
+
+	    // Parse: is silent store or comp simp?
 	    const std::string& AlertReason = Cols.at(AlertReasonColIdx);
 	    if (AlertReason == "comp-simp") {
 		this->IsCompSimp = true;
@@ -168,9 +190,6 @@ private:
 
 	    // parse fn name
 	    this->SubName = Cols.at(SubNameColIdx);
-
-	    errs() << "Csv parser parsed row: (" << this->SubName << ", " <<
-		(this->IsCompSimp ? "cs" : "ss") << ", " << this->InsnIdx << ")\n";
         }
     };
 
@@ -242,17 +261,6 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Fil
         }
 
 	Line.fill(0);
-    }
-
-    // For debugging
-    errs() << "Done parsing checker alerts csv file:\n";
-    for (const auto& SubIndices : this->IndicesToInstrument) {
-	const std::string& SubName = SubIndices.first;
-	const std::set<int>& Indices = SubIndices.second;
-
-	for (int Idx : Indices) {
-	    errs() << SubName << ", " << Idx << '\n';
-	}
     }
 }
 
@@ -1804,8 +1812,21 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 
     std::string SubName = MF.getName().str();
 
+    bool IsFirstMBB = true;
+
     for (auto& MBB : MF) {
+	if (IsFirstMBB) {
+	    IsFirstMBB = false;
+	    errs() << "First MBB is: " << MBB << '\n';
+	}
         for (auto& MI : MBB) {
+
+	    // don't count 'meta' insns like debug info, CFI indicators
+	    // as instructions in the instruction idx counts
+	    const MCInstrDesc& MIDesc = MI.getDesc();
+	    if (MIDesc.isPseudo()) {
+		continue;
+	    }
             // Don't harden frame setup stuff like `push rbp`
 	    // useful for debugging, keep around
             // if (MI.mayStore()) {
@@ -1813,13 +1834,20 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
             //     doesModifyFunction = true;
             // }
 	    if (this->shouldRunOnInstructionIdx(SubName)) {
+		{
+                    // Block for printing debug info only
+		    const auto &STI = MF.getSubtarget();
+		    auto *TII = STI.getInstrInfo();
+		    errs() << "hardening insn at idx " << this->InstructionIdx
+			   << " the MIR insn is: " << TII->getName(MI.getOpcode())
+			   << '\n';
+		}
 	        this->doX86SilentStoreHardening(MI, MBB, MF);
                 doesModifyFunction = true;
 	    }
 
             this->InstructionIdx += 1;
         }
-        // errs() << MBB << '\n';
     }
 
     return doesModifyFunction;
