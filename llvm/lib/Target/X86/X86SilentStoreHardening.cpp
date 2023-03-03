@@ -46,8 +46,7 @@ class X86_64SilentStoreMitigationPass : public MachineFunctionPass {
 public:
     static char ID;
 
-    X86_64SilentStoreMitigationPass() : MachineFunctionPass(ID) {
-    }
+    X86_64SilentStoreMitigationPass() : MachineFunctionPass(ID) {}
 
     bool runOnMachineFunction(MachineFunction &MF) override;
 
@@ -63,8 +62,8 @@ public:
     }
 
     bool shouldRunOnInstructionIdx(const std::string& SubName) const {
-	auto FoundIter = this->IndicesToInstrument.find(SubName);
-	bool SubRequiresInstrumenting = FoundIter != this->IndicesToInstrument.end();
+	auto FoundIter = IndicesToInstrument.find(SubName);
+	bool SubRequiresInstrumenting = FoundIter != IndicesToInstrument.end();
 	assert(SubRequiresInstrumenting &&
 	       "Trying to instrument sub that doesn't require instrumenting (not in flagged CSV records)");
 
@@ -84,7 +83,15 @@ private:
     /* Number of instructions instrumented so far. */
     int NumInstrumented{};
 
-    std::map<std::string, std::set<int>> IndicesToInstrument{};
+    inline static std::map<std::string, std::set<int>> IndicesToInstrument;
+
+    inline static std::map<std::pair<std::string, int>, std::string> ExpectedOpcodeNames;
+
+    inline static std::set<std::string> FunctionsToInstrument;
+
+    inline static std::set<std::string> FunctionsInstrumented;
+
+    inline static bool CSVFileAlreadyParsed;
 
     void doX86SilentStoreHardening(MachineInstr& MI,
         MachineBasicBlock& MBB,
@@ -96,6 +103,15 @@ private:
         bool IsSilentStore{};
         bool IsCompSimp{};
         int InsnIdx{};
+
+	void Print() const noexcept {
+	    errs() << "CSV ROW:\n";
+	    errs() << "\tSubName: " << this->SubName << '\n';
+	    errs() << "\tOpcodeName: " << this->OpcodeName << '\n';
+	    errs() << "\tIsSilentStore: " << this->IsSilentStore << '\n';
+	    errs() << "\tIsCompSimp: " << this->IsCompSimp << '\n';
+	    errs() << "\tInsnIdx: " << this->InsnIdx << '\n';
+	}
 
         explicit CheckerAlertCSVLine(const std::string& Line) {
             std::istringstream StrReader(Line);
@@ -246,15 +262,31 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Fil
                 this->RelevantCSVLines.push_back(CSVLine);
 		
 		const std::string& SubName = CSVLine.SubName;
+		const std::string& OpcodeName = CSVLine.OpcodeName;
 		int InsnIdx = CSVLine.InsnIdx;
 
-		auto Iter = this->IndicesToInstrument.find(SubName);
-		if (Iter == this->IndicesToInstrument.end()) {
+		FunctionsToInstrument.insert(CSVLine.SubName);
+
+		/* add map of (SubName, InsnIdx) -> ExpectedOpcodeNameString for faster checking later */
+		std::pair<std::string, int> NameIdxPair = std::pair<std::string, int>(SubName, InsnIdx);
+		auto ExpectedIter = ExpectedOpcodeNames.find(NameIdxPair);
+		if (ExpectedIter != ExpectedOpcodeNames.end() &&
+		    ExpectedIter->second != OpcodeName) {
+		    errs() << "Duplicate subname, idx pair with differing opcodes: "
+			   << NameIdxPair.first << ", " << NameIdxPair.second
+			   << " differs on opcodes " << ExpectedIter->second << " and " << OpcodeName << '\n';
+		    assert(ExpectedIter == ExpectedOpcodeNames.end() &&
+			   "Duplicate subname, idx pair in hardening pass");
+		}
+		ExpectedOpcodeNames.insert({ NameIdxPair, OpcodeName });
+
+		auto IdxIter = IndicesToInstrument.find(SubName);
+		if (IdxIter == IndicesToInstrument.end()) {
 		    std::set<int> FreshSet{};
 		    FreshSet.insert(InsnIdx);
-		    this->IndicesToInstrument[SubName] = FreshSet;
+		    IndicesToInstrument[SubName] = FreshSet;
 		} else {
-		    std::set<int>& Indices = Iter->second;
+		    std::set<int>& Indices = IdxIter->second;
 		    Indices.insert(InsnIdx);
 		}
             }
@@ -1800,9 +1832,12 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     if (!EnableSilentStore)
         return false;
 
-    llvm::errs() << "[SilentStore]\n";
-
-    this->readCheckerAlertCSV(SilentStoreCSVPath);
+    /* static class member: don't reparse the CSV file on each MachineFunction
+       in the compilation unit */
+    if (!CSVFileAlreadyParsed) {
+	this->readCheckerAlertCSV(SilentStoreCSVPath);
+	CSVFileAlreadyParsed = true;
+    }
 
     bool doesModifyFunction = false;
     
@@ -1810,43 +1845,75 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
         return doesModifyFunction;
     }
 
+    llvm::errs() << "[SilentStore]\n";
+
     std::string SubName = MF.getName().str();
 
-    bool IsFirstMBB = true;
+    bool SameSymbolNameAlreadyInstrumented =
+	FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
+    if (SameSymbolNameAlreadyInstrumented) {
+	errs() << "Trying to transform two different functions with identical symbol names: "
+	       << SubName << '\n';
+	assert(!SameSymbolNameAlreadyInstrumented &&
+	       "Trying to transform two different functions"
+	       " with identical symbol names is not allowed");
+	       
+    }
+    FunctionsInstrumented.insert(SubName);
 
     for (auto& MBB : MF) {
-	if (IsFirstMBB) {
-	    IsFirstMBB = false;
-	    errs() << "First MBB is: " << MBB << '\n';
-	}
         for (auto& MI : MBB) {
-
 	    // don't count 'meta' insns like debug info, CFI indicators
 	    // as instructions in the instruction idx counts
+	    // we are only on LLVM14, so this is the only descriptor available.
 	    const MCInstrDesc& MIDesc = MI.getDesc();
 	    if (MIDesc.isPseudo()) {
 		continue;
 	    }
-            // Don't harden frame setup stuff like `push rbp`
-	    // useful for debugging, keep around
-            // if (MI.mayStore()) {
-            //     this->doX86SilentStoreHardening(MI, MBB, MF);
-            //     doesModifyFunction = true;
-            // }
+
+	    this->InstructionIdx += 1;
+
+	    if (!MI.mayStore()) {
+		continue;
+	    }
+	    
 	    if (this->shouldRunOnInstructionIdx(SubName)) {
-		{
-                    // Block for printing debug info only
-		    const auto &STI = MF.getSubtarget();
-		    auto *TII = STI.getInstrInfo();
-		    errs() << "hardening insn at idx " << this->InstructionIdx
-			   << " the MIR insn is: " << TII->getName(MI.getOpcode())
-			   << '\n';
+		const auto &STI = MF.getSubtarget();
+		auto *TII = STI.getInstrInfo();
+		std::string CurOpcodeName = TII->getName(MI.getOpcode()).str();
+		errs() << "hardening insn at idx " << this->InstructionIdx
+		       << " the MIR insn is: " << CurOpcodeName
+		       << '\n';
+
+		auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, this->InstructionIdx);
+		auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
+		assert(Iter != ExpectedOpcodeNames.end());
+		const std::string& ExpectedOpcode = Iter->second;
+		    
+		// If there was a mismatch, then find the originating checker
+		// alert CSV row and print it out compared to this insn.
+		if (ExpectedOpcode != CurOpcodeName) {
+		    auto IsCurCsvRow = [&](const CheckerAlertCSVLine& Row) {
+			return Row.SubName == SubName &&
+			    this->InstructionIdx == Row.InsnIdx;
+		    };
+
+		    auto ErrIter = std::find_if(this->RelevantCSVLines.begin(),
+						this->RelevantCSVLines.end(),
+						IsCurCsvRow);
+		    assert(ErrIter != this->RelevantCSVLines.end());
+			
+		    errs() << "Mismatch in instruction indices in function "
+			   << SubName << '\n';
+
+		    errs() << "CSV Row was:\n";
+		    ErrIter->Print();
+		    // exit(-1);
 		}
+		
 	        this->doX86SilentStoreHardening(MI, MBB, MF);
                 doesModifyFunction = true;
 	    }
-
-            this->InstructionIdx += 1;
         }
     }
 
@@ -1854,23 +1921,30 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 }
 
 bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(const MachineFunction& MF) {
-    const StringRef FuncName = MF.getName();
-
-    auto IsFlaggedFunc = [&FuncName](const CheckerAlertCSVLine& CsvLine) {
-	const std::string& FlaggedName = CsvLine.SubName;
-	return FuncName.equals(FlaggedName);
-    };
-
-    auto Iter = std::find_if(this->RelevantCSVLines.begin(), this->RelevantCSVLines.end(), IsFlaggedFunc);
-
-    bool FoundFlaggedFuncSameName = Iter != this->RelevantCSVLines.end();
     
-    return FoundFlaggedFuncSameName;
+    const std::string FuncName = MF.getName().str();
+
+    auto FuncsIter = FunctionsToInstrument.find(FuncName);
+
+    bool FoundFunction = FuncsIter != FunctionsToInstrument.end();
+
+    return FoundFunction;
+
+    // auto IsFlaggedFunc = [&FuncName](const CheckerAlertCSVLine& CsvLine) {
+    // 	const std::string& FlaggedName = CsvLine.SubName;
+    // 	return FuncName.equals(FlaggedName);
+    // };
+
+    // auto Iter = std::find_if(this->RelevantCSVLines.begin(), this->RelevantCSVLines.end(), IsFlaggedFunc);
+
+    // bool FoundFlaggedFuncSameName = Iter != this->RelevantCSVLines.end();
+    
+    // return FoundFlaggedFuncSameName;
 }
 
 // Useful for debugging passes, keep around.
 // bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(const MachineFunction& MF) {
-//     const Function& F = MF.getFunction();
+//     const Function& F = MF.getFunction();	    
 
 //     for (auto& Arg : F.args()) {
 //         if (Arg.hasAttribute(Attribute::Secret)) {
