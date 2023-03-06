@@ -74,3 +74,4 @@ Index, Instruction
 73, SHR32rCL
 74, SHR16rCL
 75, SHR8rCL
+76, MUL32r
