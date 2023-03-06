@@ -62,6 +62,8 @@ void initializeTarget(PassRegistry&);
 
 void initializeAAEvalLegacyPassPass(PassRegistry&);
 void initializeAAResultsWrapperPassPass(PassRegistry&);
+void initializeInsertCompSimpTestFunctionsLegacyPassPass(PassRegistry&);
+void initializeInsertScratchGlobalsLegacyPassPass(PassRegistry&);
 void initializeADCELegacyPassPass(PassRegistry&);
 void initializeAddDiscriminatorsLegacyPassPass(PassRegistry&);
 void initializeAddFSDiscriminatorsPass(PassRegistry &);

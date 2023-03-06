@@ -1,4 +1,6 @@
 add_llvm_component_library(LLVMScalarOpts
+  InsertScratchGlobals.cpp
+  InsertCompSimpTestFunctions.cpp
   ADCE.cpp
   AlignmentFromAssumptions.cpp
   AnnotationRemarks.cpp

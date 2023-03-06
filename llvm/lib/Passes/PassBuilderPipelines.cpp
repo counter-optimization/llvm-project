@@ -70,6 +70,8 @@
 #include "llvm/Transforms/Instrumentation/InstrProfiling.h"
 #include "llvm/Transforms/Instrumentation/MemProfiler.h"
 #include "llvm/Transforms/Instrumentation/PGOInstrumentation.h"
+#include "llvm/Transforms/Scalar/InsertCompSimpTestFunctions.h"
+#include "llvm/Transforms/Scalar/InsertScratchGlobals.h"
 #include "llvm/Transforms/Scalar/ADCE.h"
 #include "llvm/Transforms/Scalar/AlignmentFromAssumptions.h"
 #include "llvm/Transforms/Scalar/AnnotationRemarks.h"
@@ -1246,6 +1248,7 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   if (!LTOPreLink)
     MPM.addPass(RelLookupTableConverterPass());
 
+  // MPM.addPass(InsertScratchGlobalsPass());
   return MPM;
 }
 
@@ -1288,6 +1291,8 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
   if (LTOPreLink)
     addRequiredLTOPreLinkPasses(MPM);
 
+  MPM.addPass(InsertCompSimpTestFunctionsPass());
+  MPM.addPass(InsertScratchGlobalsPass());
   return MPM;
 }
 
@@ -1785,6 +1790,8 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
 
   MPM.addPass(createModuleToFunctionPassAdaptor(AnnotationRemarksPass()));
 
+  MPM.addPass(InsertCompSimpTestFunctionsPass());
+  MPM.addPass(InsertScratchGlobalsPass());
   return MPM;
 }
 
