@@ -61,14 +61,14 @@ public:
         return "Silent stores mitigations";
     }
 
-    bool shouldRunOnInstructionIdx(const std::string& SubName) const {
+    bool shouldRunOnInstructionIdx(const std::string& SubName, const int CurIdx) const {
 	auto FoundIter = IndicesToInstrument.find(SubName);
 	bool SubRequiresInstrumenting = FoundIter != IndicesToInstrument.end();
 	assert(SubRequiresInstrumenting &&
 	       "Trying to instrument sub that doesn't require instrumenting (not in flagged CSV records)");
 
 	const std::set<int>& Indices = FoundIter->second;
-	auto IndicesIter = Indices.find(this->InstructionIdx);
+	auto IndicesIter = Indices.find(CurIdx);
 	bool IdxRequiresInstrumenting = IndicesIter != Indices.end();
 	
 	return IdxRequiresInstrumenting;
@@ -91,15 +91,14 @@ private:
 
     inline static std::set<std::string> FunctionsInstrumented;
 
-    inline static bool CSVFileAlreadyParsed;
+    inline static bool CSVFileAlreadyParsed{};
 
-    void doX86SilentStoreHardening(MachineInstr& MI,
-        MachineBasicBlock& MBB,
-        MachineFunction& MF);
+    void doX86SilentStoreHardening(MachineInstr& MI, MachineBasicBlock& MBB, MachineFunction& MF);
 
     struct CheckerAlertCSVLine {
 	std::string SubName{};
 	std::string OpcodeName{};
+	std::string Addr{};
         bool IsSilentStore{};
         bool IsCompSimp{};
         int InsnIdx{};
@@ -108,6 +107,7 @@ private:
 	    errs() << "CSV ROW:\n";
 	    errs() << "\tSubName: " << this->SubName << '\n';
 	    errs() << "\tOpcodeName: " << this->OpcodeName << '\n';
+	    errs() << "\tAddr: " << this->Addr << '\n';
 	    errs() << "\tIsSilentStore: " << this->IsSilentStore << '\n';
 	    errs() << "\tIsCompSimp: " << this->IsCompSimp << '\n';
 	    errs() << "\tInsnIdx: " << this->InsnIdx << '\n';
@@ -171,18 +171,13 @@ private:
 			assert(false && "Error reading checker alert CSV file, str read failed");
 		    }
 		}
-
-		// errs() << "Col chars so far are:\n";
-		// for (char Char : ColChars) {
-		//     errs() << Char;
-		// }
-		// errs() << '\n';
 	    }
 
 	    assert(NumCols == ColsRead && "Checker alert CSV col header mismatch.");
 
 	    constexpr int SubNameColIdx = 0;
 	    constexpr int OpcodeNameColIdx = 1;
+	    constexpr int AddrColIdx = 2;
 	    constexpr int InsnIdxColIdx = 3;
 	    constexpr int AlertReasonColIdx = 10;
 
@@ -199,6 +194,8 @@ private:
 	    if (AlertReason == "silent-stores") {
 		this->IsSilentStore = true;
 	    }
+
+	    this->Addr = Cols.at(AddrColIdx);
 
 	    // Parse insn idx
 	    const std::string& InsnIdxStr = Cols.at(InsnIdxColIdx);
@@ -1848,7 +1845,8 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     llvm::errs() << "[SilentStore]\n";
 
     std::string SubName = MF.getName().str();
-
+    errs() << "Hardening func: " << SubName << '\n';
+    
     bool SameSymbolNameAlreadyInstrumented =
 	FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
     if (SameSymbolNameAlreadyInstrumented) {
@@ -1861,31 +1859,41 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     }
     FunctionsInstrumented.insert(SubName);
 
+    bool IsFirstMBB{true};
+
     for (auto& MBB : MF) {
+	if (IsFirstMBB) {
+	    errs() << "First MBB is:\n";
+	    errs() << MBB << '\n';
+	}
         for (auto& MI : MBB) {
+	    const auto &STI = MF.getSubtarget();
+	    auto *TII = STI.getInstrInfo();
+	    std::string CurOpcodeName = TII->getName(MI.getOpcode()).str();
+	    
 	    // don't count 'meta' insns like debug info, CFI indicators
 	    // as instructions in the instruction idx counts
 	    // we are only on LLVM14, so this is the only descriptor available.
 	    const MCInstrDesc& MIDesc = MI.getDesc();
 	    if (MIDesc.isPseudo()) {
+		errs() << "MI: " << CurOpcodeName << " is pseudo insn\n";
 		continue;
 	    }
 
-	    this->InstructionIdx += 1;
+	    errs() << "MI: " << CurOpcodeName << " causing insn idx increment\n";
+	    const int CurIdx = this->InstructionIdx++;
 
 	    if (!MI.mayStore()) {
 		continue;
 	    }
 	    
-	    if (this->shouldRunOnInstructionIdx(SubName)) {
-		const auto &STI = MF.getSubtarget();
-		auto *TII = STI.getInstrInfo();
-		std::string CurOpcodeName = TII->getName(MI.getOpcode()).str();
-		errs() << "hardening insn at idx " << this->InstructionIdx
+	    if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
+		errs() << "hardening insn at idx " << CurIdx
 		       << " the MIR insn is: " << CurOpcodeName
+		       << " the full MI is: " << MI
 		       << '\n';
 
-		auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, this->InstructionIdx);
+		auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, CurIdx);
 		auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
 		assert(Iter != ExpectedOpcodeNames.end());
 		const std::string& ExpectedOpcode = Iter->second;
@@ -1894,8 +1902,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 		// alert CSV row and print it out compared to this insn.
 		if (ExpectedOpcode != CurOpcodeName) {
 		    auto IsCurCsvRow = [&](const CheckerAlertCSVLine& Row) {
-			return Row.SubName == SubName &&
-			    this->InstructionIdx == Row.InsnIdx;
+			return Row.SubName == SubName && CurIdx == Row.InsnIdx;
 		    };
 
 		    auto ErrIter = std::find_if(this->RelevantCSVLines.begin(),
