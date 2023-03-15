@@ -75,3 +75,9 @@ Index, Instruction
 74, SHR16rCL
 75, SHR8rCL
 76, MUL32r
+77, CMP64rr
+78, CMP64rm
+79, CMP32rr
+80, CMP32rm
+81, CMP32mr
+82, CMP8rr
