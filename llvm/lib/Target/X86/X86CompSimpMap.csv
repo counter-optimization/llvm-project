@@ -81,3 +81,4 @@ Index, Instruction
 80, CMP32rm
 81, CMP32mr
 82, CMP8rr
+83, SBB32rr
