@@ -85,3 +85,8 @@ Index, Instruction
 84, IMUL32rr
 85, IMUL32rm
 86, VPXORrr
+87, VPXORrm
+88, VPXORYrr
+89, VPXORYrm
+90, PXORrr
+91, PXORrm
