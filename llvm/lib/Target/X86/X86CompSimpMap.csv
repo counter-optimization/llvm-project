@@ -83,3 +83,5 @@ Index, Instruction
 82, CMP8rr
 83, SBB32rr
 84, IMUL32rr
+85, IMUL32rm
+86, VPXORrr
