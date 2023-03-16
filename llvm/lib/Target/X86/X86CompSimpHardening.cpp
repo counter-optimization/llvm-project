@@ -139,6 +139,9 @@ private:
   void insertSafeCmp64rmBefore(MachineInstr *MI);
   void insertSafeCmp8rrBefore(MachineInstr *MI);
   void insertSafeVPXorrrBefore(MachineInstr *MI);
+  void insertSafeVPOrrrBefore(MachineInstr *MI);
+  void insertSafeVPOrrmBefore(MachineInstr *MI);
+  void insertSafeVPOryrrBefore(MachineInstr *MI);
   void insertSafeVPXoryrrBefore(MachineInstr *MI);
   void insertSafeVPXoryrmBefore(MachineInstr *MI);
   void insertSafeVPXorrmBefore(MachineInstr *MI);
@@ -463,6 +466,224 @@ void X86_64CompSimpMitigationPass::insertSafeVPXoryrrBefore(MachineInstr *MI) {
       .addImm(0x0F);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), MOp0).addReg(X86::YMM13);
+}
+
+void X86_64CompSimpMitigationPass::insertSafeVPOryrrBefore(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  auto MOp0 = MI->getOperand(0).getReg();
+  auto MOp1 = MI->getOperand(1).getReg();
+  auto MOp2 = MI->getOperand(2).getReg();
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), X86::YMM15).addReg(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), X86::YMM14).addReg(MOp2);
+
+  // Set all bits in xmm to 1
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBYrr), X86::YMM13)
+      .addReg(X86::YMM13)
+      .addReg(X86::YMM13);
+
+  // Interchange upper and lower halves of YMM15/14 and YMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWYrri), X86::YMM15)
+      .addReg(X86::YMM15)
+      .addReg(X86::YMM13)
+      .addImm(0x0F);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWYrri), X86::YMM14)
+      .addReg(X86::YMM14)
+      .addReg(X86::YMM13)
+      .addImm(0x0F);
+
+  // XOR YMM15 with YMM14 and save the result in YMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORYrr), X86::YMM13)
+      .addReg(X86::YMM15)
+      .addReg(X86::YMM14);
+
+  // Set all bits in YMM15/14 to 1
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBYrr), X86::YMM15)
+      .addReg(X86::YMM15)
+      .addReg(X86::YMM15);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBYrr), X86::YMM14)
+      .addReg(X86::YMM14)
+      .addReg(X86::YMM14);
+
+  // Interchange upper and lower halves of input registers and YMM15/14
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWYrri), X86::YMM15)
+      .addReg(X86::YMM15)
+      .addReg(MOp1)
+      .addImm(0x0F);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWYrri), X86::YMM14)
+      .addReg(X86::YMM14)
+      .addReg(MOp2)
+      .addImm(0x0F);
+
+  // XOR YMM15 with YMM14 and save the result in YMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORYrr), X86::YMM15)
+      .addReg(X86::YMM15)
+      .addReg(X86::YMM14);
+
+  // Build result by interchanging upper and lower halves of YMM13 and YMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWYrri), X86::YMM13)
+      .addReg(X86::YMM13)
+      .addReg(X86::YMM15)
+      .addImm(0x0F);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), MOp0).addReg(X86::YMM13);
+}
+
+void X86_64CompSimpMitigationPass::insertSafeVPOrrmBefore(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  auto MOp0 = MI->getOperand(0).getReg();
+  auto MOp1 = MI->getOperand(1).getReg();
+
+  MachineOperand Op2 = MI->getOperand(2);
+  MachineOperand Op3 = MI->getOperand(3);
+  MachineOperand Op4 = MI->getOperand(4);
+  MachineOperand Op5 = MI->getOperand(5);
+  MachineOperand Op6 = MI->getOperand(6);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArm), X86::XMM12)
+      .add(Op2)
+      .add(Op3)
+      .add(Op4)
+      .add(Op5)
+      .add(Op6);
+
+  auto MOp2 = X86::XMM12;
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).addReg(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM14).addReg(MOp2);
+
+  // Set all bits in xmm to 1
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBrr), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM13);
+
+  // Interchange upper and lower halves of XMM15/14 and XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM13)
+      .addImm(0x0F);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addReg(X86::XMM13)
+      .addImm(0x0F);
+
+  // XOR XMM15 with XMM14 and save the result in XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORrr), X86::XMM13)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM14);
+
+  // Set all bits in XMM15/14 to 1
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBrr), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM15);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBrr), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addReg(X86::XMM14);
+
+  // Interchange upper and lower halves of input registers and XMM15/14
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(MOp1)
+      .addImm(0x0F);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addReg(MOp2)
+      .addImm(0x0F);
+
+  // XOR XMM15 with XMM14 and save the result in XMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORrr), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM14);
+
+  // Build result by interchanging upper and lower halves of XMM13 and XMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM15)
+      .addImm(0x0F);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), MOp0).addReg(X86::XMM13);
+}
+
+void X86_64CompSimpMitigationPass::insertSafeVPOrrrBefore(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  auto MOp0 = MI->getOperand(0).getReg();
+  auto MOp1 = MI->getOperand(1).getReg();
+  auto MOp2 = MI->getOperand(2).getReg();
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).addReg(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM14).addReg(MOp2);
+
+  // Set all bits in xmm to 1
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBrr), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM13);
+
+  // Interchange upper and lower halves of XMM15/14 and XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM13)
+      .addImm(0x0F);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addReg(X86::XMM13)
+      .addImm(0x0F);
+
+  // XOR XMM15 with XMM14 and save the result in XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORrr), X86::XMM13)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM14);
+
+  // Set all bits in XMM15/14 to 1
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBrr), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM15);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBrr), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addReg(X86::XMM14);
+
+  // Interchange upper and lower halves of input registers and XMM15/14
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(MOp1)
+      .addImm(0x0F);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addReg(MOp2)
+      .addImm(0x0F);
+
+  // XOR XMM15 with XMM14 and save the result in XMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORrr), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM14);
+
+  // Build result by interchanging upper and lower halves of XMM13 and XMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDWrri), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM15)
+      .addImm(0x0F);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), MOp0).addReg(X86::XMM13);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeVPXorrrBefore(MachineInstr *MI) {
@@ -5856,6 +6077,30 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
     MI->eraseFromParent();
     break;
   }
+  case X86::VPORrr: {
+    insertSafeVPOrrrBefore(MI);
+    updateStats(MI, 92);
+    MI->eraseFromParent();
+    break;
+  }
+  case X86::VPORYrr: {
+    insertSafeVPOryrrBefore(MI);
+    updateStats(MI, 93);
+    MI->eraseFromParent();
+    break;
+  }
+  case X86::PORrr: {
+    insertSafeVPOrrrBefore(MI);
+    updateStats(MI, 94);
+    MI->eraseFromParent();
+    break;
+  }
+  case X86::PORrm: {
+    insertSafeVPOrrmBefore(MI);
+    updateStats(MI, 95);
+    MI->eraseFromParent();
+    break;
+  }
 }
 }
 
@@ -6314,6 +6559,29 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
+        if (Op == "VPORrr")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORrr))
+              .addReg(X86::XMM0)
+              .addReg(X86::XMM0)
+              .addReg(X86::XMM1);
+        if (Op == "VPORYrr")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORYrr))
+              .addReg(X86::YMM0)
+              .addReg(X86::YMM0)
+              .addReg(X86::YMM1);
+        if (Op == "PORrr")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrr))
+              .addReg(X86::XMM0)
+              .addReg(X86::XMM1);
+        if (Op == "PORrm")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrm))
+              .addReg(X86::XMM0)
+              .addReg(X86::RCX)
+              .addImm(1)
+              .addReg(0)
+              .addImm(0)
+              .addReg(0);
+
         // TODO
         // ADD32i32
         // AND64i32
