@@ -90,3 +90,7 @@ Index, Instruction
 89, VPXORYrm
 90, PXORrr
 91, PXORrm
+92, VPORrr
+93, VPORYrr
+94, PORrr
+95, PORrm
