@@ -94,3 +94,4 @@ Index, Instruction
 93, VPORYrr
 94, PORrr
 95, PORrm
+96, VPADDDrr
