@@ -76,7 +76,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "VPXORrm",   "VPXORYrr",  "VPXORYrm",  "PXORrr",   "PXORrm",
       "VPORrr",    "VPORYrr",   "PORrr",     "PORrm",    "VPADDDrr",
       "VPADDDrm",  "VPADDDYrr", "VPADDDYrm", "VPADDQrr", "VPADDQrm",
-      "VPADDQYrr", "VPADDQYrm"};
+      "VPADDQYrr", "VPADDQYrm", "PADDQrr",   "PADDQrm"};
   for (auto S : Inst) {
     createFunction(S + "-original");
     createFunction(S + "-transformed");
