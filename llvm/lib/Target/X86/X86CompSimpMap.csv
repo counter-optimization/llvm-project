@@ -106,3 +106,5 @@ Index, Instruction
 105, PADDQrm
 106, VPANDrr
 107, VPANDrm
+108, PANDrr
+109, PANDrm

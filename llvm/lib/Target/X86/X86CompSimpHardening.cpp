@@ -7205,6 +7205,18 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
     MI->eraseFromParent();
     break;
   }
+  case X86::PANDrr: {
+    insertSafeVPAndrrBefore(MI);
+    updateStats(MI, 108);
+    MI->eraseFromParent();
+    break;
+  }
+  case X86::PANDrm: {
+    insertSafeVPAndrmBefore(MI);
+    updateStats(MI, 109);
+    MI->eraseFromParent();
+    break;
+  }
 }
 }
 
@@ -7761,6 +7773,18 @@ static void setupTest(MachineFunction &MF) {
         if (Op == "VPANDrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPANDrm))
               .addReg(X86::XMM0)
+              .addReg(X86::XMM0)
+              .addReg(X86::RCX)
+              .addImm(1)
+              .addReg(0)
+              .addImm(0)
+              .addReg(0);
+        if (Op == "PANDrr")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PANDrr))
+              .addReg(X86::XMM0)
+              .addReg(X86::XMM1);
+        if (Op == "PANDrm")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PANDrm))
               .addReg(X86::XMM0)
               .addReg(X86::RCX)
               .addImm(1)
