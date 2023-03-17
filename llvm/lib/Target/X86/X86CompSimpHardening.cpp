@@ -142,6 +142,8 @@ private:
   void insertSafeVPOrrrBefore(MachineInstr *MI);
   void insertSafeVPOrrmBefore(MachineInstr *MI);
   void insertSafeVPAddDrrBefore(MachineInstr *MI);
+  void insertSafeVPAddQrrBefore(MachineInstr *MI);
+  void insertSafeVPAddQrmBefore(MachineInstr *MI);
   void insertSafeVPAddDYrrBefore(MachineInstr *MI);
   void insertSafeVPAddDYrmBefore(MachineInstr *MI);
   void insertSafeVPAddDrmBefore(MachineInstr *MI);
@@ -1120,6 +1122,224 @@ void X86_64CompSimpMitigationPass::insertSafeVPAddDrrBefore(MachineInstr *MI) {
 
   // Add XMM14 with XMM13 and save the result in X86::XMM13
   BuildMI(*MBB, *MI, DL, TII->get(X86::VPADDDrr), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM14);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), MOp0).addReg(X86::XMM13);
+}
+
+void X86_64CompSimpMitigationPass::insertSafeVPAddQrmBefore(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  auto MOp0 = MI->getOperand(0).getReg();
+  auto MOp1 = MI->getOperand(1).getReg();
+
+  MachineOperand Op2 = MI->getOperand(2);
+  MachineOperand Op3 = MI->getOperand(3);
+  MachineOperand Op4 = MI->getOperand(4);
+  MachineOperand Op5 = MI->getOperand(5);
+  MachineOperand Op6 = MI->getOperand(6);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArm), X86::XMM12)
+      .add(Op2)
+      .add(Op3)
+      .add(Op4)
+      .add(Op5)
+      .add(Op6);
+
+  auto MOp2 = X86::XMM12;
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).addReg(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM14).addReg(MOp2);
+
+  // Shift left XMM15 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSLLQri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addImm(32);
+
+  // Shift left XMM14 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSLLQri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addImm(32);
+
+  // Shift right XMM15 by 1 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addImm(1);
+
+  // Shift right XMM14 by 1 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addImm(1);
+
+  // Set all bits in XMM13 to 1
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBrr), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM13);
+
+  // Shift right XMM13 by 31 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addImm(61);
+
+  // OR XMM15 with XMM13 and save the result in XMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORrr), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM13);
+
+  // OR XMM14 with XMM13 and save the result in XMM14
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORrr), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addReg(X86::XMM13);
+
+  // ADD XMM15 with XMM14 and save the result in XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPADDQrr), X86::XMM13)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM14);
+
+  // Shift XMM13 right by 15 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addImm(31);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).addReg(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM14).addReg(MOp2);
+
+  // Shift right XMM15 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addImm(32);
+
+  // Shift left XMM15 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSLLQri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addImm(32);
+
+  // Shift right XMM14 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addImm(32);
+
+  // Shift left XMM14 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSLLQri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addImm(32);
+
+  // Add XMM15 with XMM13 and save the result in XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPADDQrr), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM15);
+
+  // Add XMM14 with XMM13 and save the result in X86::XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPADDQrr), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM14);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), MOp0).addReg(X86::XMM13);
+}
+
+void X86_64CompSimpMitigationPass::insertSafeVPAddQrrBefore(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  auto MOp0 = MI->getOperand(0).getReg();
+  auto MOp1 = MI->getOperand(1).getReg();
+  auto MOp2 = MI->getOperand(2).getReg();
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).addReg(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM14).addReg(MOp2);
+
+  // Shift left XMM15 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSLLQri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addImm(32);
+
+  // Shift left XMM14 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSLLQri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addImm(32);
+
+  // Shift right XMM15 by 1 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addImm(1);
+
+  // Shift right XMM14 by 1 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addImm(1);
+
+  // Set all bits in XMM13 to 1
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQBrr), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM13);
+
+  // Shift right XMM13 by 31 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addImm(61);
+
+  // OR XMM15 with XMM13 and save the result in XMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORrr), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM13);
+
+  // OR XMM14 with XMM13 and save the result in XMM14
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORrr), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addReg(X86::XMM13);
+
+  // ADD XMM15 with XMM14 and save the result in XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPADDQrr), X86::XMM13)
+      .addReg(X86::XMM15)
+      .addReg(X86::XMM14);
+
+  // Shift XMM13 right by 15 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addImm(31);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).addReg(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), X86::XMM14).addReg(MOp2);
+
+  // Shift right XMM15 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addImm(32);
+
+  // Shift left XMM15 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSLLQri), X86::XMM15)
+      .addReg(X86::XMM15)
+      .addImm(32);
+
+  // Shift right XMM14 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSRLQri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addImm(32);
+
+  // Shift left XMM14 by 16 bits
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSLLQri), X86::XMM14)
+      .addReg(X86::XMM14)
+      .addImm(32);
+
+  // Add XMM15 with XMM13 and save the result in XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPADDQrr), X86::XMM13)
+      .addReg(X86::XMM13)
+      .addReg(X86::XMM15);
+
+  // Add XMM14 with XMM13 and save the result in X86::XMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPADDQrr), X86::XMM13)
       .addReg(X86::XMM13)
       .addReg(X86::XMM14);
 
@@ -6565,6 +6785,18 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
     MI->eraseFromParent();
     break;
   }
+  case X86::VPADDQrr: {
+    insertSafeVPAddQrrBefore(MI);
+    updateStats(MI, 100);
+    MI->eraseFromParent();
+    break;
+  }
+  case X86::VPADDQrm: {
+    insertSafeVPAddQrmBefore(MI);
+    updateStats(MI, 101);
+    MI->eraseFromParent();
+    break;
+  }
 }
 }
 
@@ -7068,6 +7300,20 @@ static void setupTest(MachineFunction &MF) {
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDDYrm))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
+              .addReg(X86::RCX)
+              .addImm(1)
+              .addReg(0)
+              .addImm(0)
+              .addReg(0);
+        if (Op == "VPADDQrr")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDQrr))
+              .addReg(X86::XMM0)
+              .addReg(X86::XMM0)
+              .addReg(X86::XMM1);
+        if (Op == "VPADDQrm")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDQrm))
+              .addReg(X86::XMM0)
+              .addReg(X86::XMM0)
               .addReg(X86::RCX)
               .addImm(1)
               .addReg(0)
