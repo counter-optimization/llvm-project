@@ -102,3 +102,5 @@ Index, Instruction
 101, VPADDQrm
 102, VPADDQYrr
 103, VPADDQYrm
+104, PADDQrr
+105, PADDQrm
