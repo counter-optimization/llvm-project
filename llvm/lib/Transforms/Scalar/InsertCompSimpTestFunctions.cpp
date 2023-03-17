@@ -56,23 +56,27 @@ void InsertCompSimpTestFunctions::createFunction(std::string Inst) {
 
 void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
   std::vector<std::string> Inst{
-      "ADD64ri8",  "ADD64ri32", "ADD64mi32", "ADD64mi8", "ADD64mr",  "ADD64rm",
-      "ADD64rr",   "ADC64rr",   "ADC64rm",   "ADC64mr",  "ADC64ri8", "ADD32rr",
-      "ADD32rm",   "ADD32ri8",  "ADD32i32",  "ADC32mi8", "ADD8rm",   "AND64rr",
-      "AND64i32",  "AND64ri32", "AND64ri8",  "AND32rr",  "AND32ri8", "AND32ri",
-      "AND32i32",  "OR64rr",    "OR64rm",    "OR64ri8",  "OR32rr",   "OR32ri8",
-      "OR8rm",     "MUL64m",    "IMUL32rm",  "XOR64rr",  "XOR64rm",  "XOR64mr",
-      "XOR32rr",   "XOR32rm",   "XOR32ri8",  "XOR8rr",   "XOR8rm",   "SUB64rr",
-      "SUB64rm",   "SUB32rr",   "TEST32rr",  "AND8rr",   "TEST8ri",  "TEST8i8",
-      "TEST8mi",   "SHL8rCL",   "SHR8ri",    "SAR8r1",   "SHR32rCL", "SHR32ri",
-      "SHR32r1",   "SHL32rCL",  "SHL32ri",   "SAR32r1",  "SAR64ri",  "SHR64ri",
-      "SHL64ri",   "AND16rr",   "OR8rr",     "OR16rr",   "XOR16rr",  "SUB8rr",
-      "SUB16rr",   "SUB32rm",   "ADD8rr",    "ADD16rr",  "ADD32rm",  "SHR64rCL",
-      "SHR32rCL",  "SHR16rCL",  "MUL32r",    "CMP64rr",  "CMP64rm",  "CMP32rr",
-      "CMP32rm",   "CMP32mr",   "CMP8rr",    "SBB32rr",  "IMUL32rr", "IMUL32rm",
-      "VPXORrr",   "VPXORrm",   "VPXORYrr",  "VPXORYrm", "PXORrr",   "PXORrm",
-      "VPORrr",    "VPORYrr",   "PORrr",     "PORrm",    "VPADDDrr", "VPADDDrm",
-      "VPADDDYrr", "VPADDDYrm"};
+      "ADD64ri8",  "ADD64ri32", "ADD64mi32", "ADD64mi8", "ADD64mr",
+      "ADD64rm",   "ADD64rr",   "ADC64rr",   "ADC64rm",  "ADC64mr",
+      "ADC64ri8",  "ADD32rr",   "ADD32rm",   "ADD32ri8", "ADD32i32",
+      "ADC32mi8",  "ADD8rm",    "AND64rr",   "AND64i32", "AND64ri32",
+      "AND64ri8",  "AND32rr",   "AND32ri8",  "AND32ri",  "AND32i32",
+      "OR64rr",    "OR64rm",    "OR64ri8",   "OR32rr",   "OR32ri8",
+      "OR8rm",     "MUL64m",    "IMUL32rm",  "XOR64rr",  "XOR64rm",
+      "XOR64mr",   "XOR32rr",   "XOR32rm",   "XOR32ri8", "XOR8rr",
+      "XOR8rm",    "SUB64rr",   "SUB64rm",   "SUB32rr",  "TEST32rr",
+      "AND8rr",    "TEST8ri",   "TEST8i8",   "TEST8mi",  "SHL8rCL",
+      "SHR8ri",    "SAR8r1",    "SHR32rCL",  "SHR32ri",  "SHR32r1",
+      "SHL32rCL",  "SHL32ri",   "SAR32r1",   "SAR64ri",  "SHR64ri",
+      "SHL64ri",   "AND16rr",   "OR8rr",     "OR16rr",   "XOR16rr",
+      "SUB8rr",    "SUB16rr",   "SUB32rm",   "ADD8rr",   "ADD16rr",
+      "ADD32rm",   "SHR64rCL",  "SHR32rCL",  "SHR16rCL", "MUL32r",
+      "CMP64rr",   "CMP64rm",   "CMP32rr",   "CMP32rm",  "CMP32mr",
+      "CMP8rr",    "SBB32rr",   "IMUL32rr",  "IMUL32rm", "VPXORrr",
+      "VPXORrm",   "VPXORYrr",  "VPXORYrm",  "PXORrr",   "PXORrm",
+      "VPORrr",    "VPORYrr",   "PORrr",     "PORrm",    "VPADDDrr",
+      "VPADDDrm",  "VPADDDYrr", "VPADDDYrm", "VPADDQrr", "VPADDQrm",
+      "VPADDQYrr", "VPADDQYrm"};
   for (auto S : Inst) {
     createFunction(S + "-original");
     createFunction(S + "-transformed");
