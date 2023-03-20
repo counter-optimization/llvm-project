@@ -649,7 +649,18 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
         Reserved.set(*AI);
   for (MCRegAliasIterator AI(X86::XMM14, this, true); AI.isValid(); ++AI)
         Reserved.set(*AI);
-
+  for (MCRegAliasIterator AI(X86::XMM13, this, true); AI.isValid(); ++AI)
+        Reserved.set(*AI);
+  for (MCRegAliasIterator AI(X86::XMM12, this, true); AI.isValid(); ++AI)
+        Reserved.set(*AI);
+  for (MCRegAliasIterator AI(X86::YMM15, this, true); AI.isValid(); ++AI)
+        Reserved.set(*AI);
+  for (MCRegAliasIterator AI(X86::YMM14, this, true); AI.isValid(); ++AI)
+        Reserved.set(*AI);
+  for (MCRegAliasIterator AI(X86::YMM13, this, true); AI.isValid(); ++AI)
+        Reserved.set(*AI);
+  for (MCRegAliasIterator AI(X86::YMM12, this, true); AI.isValid(); ++AI)
+        Reserved.set(*AI);
   return Reserved;
 }
 

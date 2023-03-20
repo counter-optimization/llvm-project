@@ -156,6 +156,8 @@ private:
   void insertSafeVPXoryrmBefore(MachineInstr *MI);
   void insertSafeVPXorrmBefore(MachineInstr *MI);
   void insertSafeVPShufBrrBefore(MachineInstr *MI);
+  void insertSafeVPShufBYrrBefore(MachineInstr *MI);
+  void insertSafeVPShufBYrmBefore(MachineInstr *MI);
   void insertSafeAdd64RR(MachineInstr *MI, MachineOperand *Op1,
                          MachineOperand *Op2);
 };
@@ -324,6 +326,159 @@ void X86_64CompSimpMitigationPass::insertSafeVPShufBrrBefore(MachineInstr *MI) {
       .addReg(X86::XMM12);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), MOp0).addReg(X86::XMM15);
+}
+
+void X86_64CompSimpMitigationPass::insertSafeVPShufBYrmBefore(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  auto MOp0 = MI->getOperand(0).getReg();
+  auto MOp1 = MI->getOperand(1).getReg();
+
+  MachineOperand Op2 = MI->getOperand(2);
+  MachineOperand Op3 = MI->getOperand(3);
+  MachineOperand Op4 = MI->getOperand(4);
+  MachineOperand Op5 = MI->getOperand(5);
+  MachineOperand Op6 = MI->getOperand(6);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrm), X86::XMM14)
+      .add(Op2)
+      .add(Op3)
+      .add(Op4)
+      .add(Op5)
+      .add(Op6);
+  
+  auto MOp2 = X86::YMM14;
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), X86::YMM15).addReg(MOp1);
+
+  // Move a 64-bit non zero contant to R11
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(0xFFFFFFFFFFFFFFFF);
+
+  // Move R11 to XMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOV64toPQIZrr), X86::XMM12).addReg(X86::R11);
+
+  // Broadcast XMM12 to YMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBROADCASTBYrr), X86::YMM13)
+      .addReg(X86::XMM12);
+
+  // XOR YMM12 and YMM12 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPXORYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM12);
+
+  // Compare YMM14 and YMM12 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQQYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM14);
+
+  // AND YMM12 and YMM13 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPANDYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM13);
+
+  // OR YMM12 and YMM14 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM14);
+
+  // Shuffle YMM15 with mask YMM12 and store in YMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSHUFBYrr), X86::YMM15)
+      .addReg(X86::YMM15)
+      .addReg(X86::YMM12);
+
+  // XOR YMM12 and YMM12 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPXORYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM12);
+
+  // Compare YMM14 and YMM12 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQQYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM14);
+
+  // Blend YMM15 and MOp1 with mask YMM12 and store in YMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDVBYrr), X86::YMM15)
+      .addReg(X86::YMM15)
+      .addReg(MOp1)
+      .addReg(X86::YMM12);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), MOp0).addReg(X86::YMM15);
+}
+
+void X86_64CompSimpMitigationPass::insertSafeVPShufBYrrBefore(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  auto MOp0 = MI->getOperand(0).getReg();
+  auto MOp1 = MI->getOperand(1).getReg();
+  auto MOp2 = MI->getOperand(2).getReg();
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), X86::YMM15).addReg(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), X86::YMM14).addReg(MOp2);
+
+  // Move a 64-bit non zero contant to R11
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(0xFFFFFFFFFFFFFFFF);
+
+  // Move R11 to XMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOV64toPQIZrr), X86::XMM12).addReg(X86::R11);
+
+  // Broadcast XMM12 to YMM13
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBROADCASTBYrr), X86::YMM13)
+      .addReg(X86::XMM12);
+
+  // XOR YMM12 and YMM12 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPXORYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM12);
+
+  // Compare YMM14 and YMM12 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQQYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM14);
+
+  // AND YMM12 and YMM13 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPANDYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM13);
+
+  // OR YMM12 and YMM14 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPORYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM14);
+
+  // Shuffle YMM15 with mask YMM12 and store in YMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPSHUFBYrr), X86::YMM15)
+      .addReg(X86::YMM15)
+      .addReg(X86::YMM12);
+
+  // XOR YMM12 and YMM12 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPXORYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM12);
+
+  // Compare YMM14 and YMM12 and store in YMM12
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPCMPEQQYrr), X86::YMM12)
+      .addReg(X86::YMM12)
+      .addReg(X86::YMM14);
+
+  // Blend YMM15 and MOp1 with mask YMM12 and store in YMM15
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VPBLENDVBYrr), X86::YMM15)
+      .addReg(X86::YMM15)
+      .addReg(MOp1)
+      .addReg(X86::YMM12);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::VMOVDQAYrr), MOp0).addReg(X86::YMM15);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeVPXorrmBefore(MachineInstr *MI) {
@@ -7303,6 +7458,18 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
     MI->eraseFromParent();
     break;
   }
+  case X86::VPSHUFBYrr: {
+    insertSafeVPShufBYrrBefore(MI);
+    updateStats(MI, 111);
+    MI->eraseFromParent();
+    break;
+  }
+  case X86::VPSHUFBYrm: {
+    insertSafeVPShufBYrmBefore(MI);
+    updateStats(MI, 112);
+    MI->eraseFromParent();
+    break;
+  }
 }
 }
 
@@ -7882,6 +8049,22 @@ static void setupTest(MachineFunction &MF) {
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
+        }
+        if (Op == "VPSHUFBYrr") {
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPSHUFBYrr))
+              .addReg(X86::YMM0)
+              .addReg(X86::YMM0)
+              .addReg(X86::YMM1);
+        }
+        if (Op == "VPSHUFBYrm") {
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPSHUFBYrm))
+              .addReg(X86::YMM0)
+              .addReg(X86::YMM0)
+              .addReg(X86::RCX)
+              .addImm(1)
+              .addReg(0)
+              .addImm(0)
+              .addReg(0);
         }
         // TODO
         // ADD32i32
