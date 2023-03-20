@@ -108,3 +108,4 @@ Index, Instruction
 107, VPANDrm
 108, PANDrr
 109, PANDrm
+110, VPSHUFBrr
