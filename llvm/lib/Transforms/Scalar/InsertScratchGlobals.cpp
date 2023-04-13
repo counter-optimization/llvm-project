@@ -53,7 +53,7 @@ bool InsertScratchGlobals::run() {
   // if (!EnableGlobalScratch) {
   //   return false;
   // }
-  for(int i = 0;i < 1000;i++){
+  for(int i = 0;i < 5000;i++){
     Type *I32 = Type::getInt32Ty(F.getContext());
     // Type *ArrI32 = ArrayType::get(I32, SSize);
     auto *Init = ConstantInt::get(I32, i);

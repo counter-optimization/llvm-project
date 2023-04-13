@@ -1898,12 +1898,12 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
         continue;
       }
 
-      errs() << "MI: " << CurOpcodeName << " causing insn idx increment\n";
-      const int CurIdx = this->InstructionIdx++;
-
       if (!MI.mayStore()) {
         continue;
       }
+
+      errs() << "MI: " << CurOpcodeName << " causing insn idx increment\n";
+      const int CurIdx = this->InstructionIdx++;
 
       if (GenIndex) {
         // increment the counter for this instruction
