@@ -17,6 +17,9 @@
 #include "X86RegisterInfo.h"
 #include "X86Subtarget.h"
 
+#include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/MC/MCContext.h"
+
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -34,6 +37,10 @@ using namespace llvm;
 
 static cl::opt<bool> EnableSilentStore("x86-ss",
                         cl::desc("Enable the X86 silent store mitigation."),
+                        cl::init(false));
+
+static cl::opt<bool> GenIndex("x86-gen-idx",
+                        cl::desc("Generate global indices for silent store instrumentation"),
                         cl::init(false));
 
 static cl::opt<std::string> SilentStoreCSVPath("x86-ss-csv-path",
@@ -272,8 +279,8 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Fil
 		    errs() << "Duplicate subname, idx pair with differing opcodes: "
 			   << NameIdxPair.first << ", " << NameIdxPair.second
 			   << " differs on opcodes " << ExpectedIter->second << " and " << OpcodeName << '\n';
-		    assert(ExpectedIter == ExpectedOpcodeNames.end() &&
-			   "Duplicate subname, idx pair in hardening pass");
+		    /* assert(ExpectedIter == ExpectedOpcodeNames.end() && */
+			   /* "Duplicate subname, idx pair in hardening pass"); */
 		}
 		ExpectedOpcodeNames.insert({ NameIdxPair, OpcodeName });
 
@@ -324,7 +331,14 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF.getRegInfo();
 
-  bool OpcodeSupported = true;
+  // create annotation label with temp name
+  /* auto TempSym = MF.getContext().createNamedTempSymbol(); */
+  /* BuildMI(MBB, MI, DL, TII->get(X86::ANNOTATION_LABEL)).addSym(TempSym); */
+  /* BuildMI(MBB, MI, DL, TII->get(X86::EH_LABEL)).addSym(TempSym); */
+  // create machine operand metadata
+  /* auto *TempSymMO = MF.getContext().createTempSymbolMDNode(TempSym); */
+  /* auto *DbgLabel = MBB.getParent()->getSubprogram()->createDebugLocLabel(DL); */
+    bool OpcodeSupported = true;
 
   switch (MI.getOpcode()) {
   case X86::MOV8mr:
@@ -1826,105 +1840,122 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 }
 
 bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) {
-    if (!EnableSilentStore)
-        return false;
+  if (!EnableSilentStore)
+    return false;
 
-    /* static class member: don't reparse the CSV file on each MachineFunction
-       in the compilation unit */
-    if (!CSVFileAlreadyParsed) {
-	this->readCheckerAlertCSV(SilentStoreCSVPath);
-	CSVFileAlreadyParsed = true;
-    }
+  /* static class member: don't reparse the CSV file on each MachineFunction
+     in the compilation unit */
+  if (!CSVFileAlreadyParsed) {
+    this->readCheckerAlertCSV(SilentStoreCSVPath);
+    CSVFileAlreadyParsed = true;
+  }
 
-    bool doesModifyFunction = false;
-    
-    if (!this->shouldRunOnMachineFunction(MF)) {
-        return doesModifyFunction;
-    }
+  bool doesModifyFunction = false;
 
-    llvm::errs() << "[SilentStore]\n";
-
-    std::string SubName = MF.getName().str();
-    errs() << "Hardening func: " << SubName << '\n';
-    
-    bool SameSymbolNameAlreadyInstrumented =
-	FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
-    if (SameSymbolNameAlreadyInstrumented) {
-	errs() << "Trying to transform two different functions with identical symbol names: "
-	       << SubName << '\n';
-	assert(!SameSymbolNameAlreadyInstrumented &&
-	       "Trying to transform two different functions"
-	       " with identical symbol names is not allowed");
-	       
-    }
-    FunctionsInstrumented.insert(SubName);
-
-    bool IsFirstMBB{true};
-
-    for (auto& MBB : MF) {
-	if (IsFirstMBB) {
-	    errs() << "First MBB is:\n";
-	    errs() << MBB << '\n';
-	}
-        for (auto& MI : MBB) {
-	    const auto &STI = MF.getSubtarget();
-	    auto *TII = STI.getInstrInfo();
-	    std::string CurOpcodeName = TII->getName(MI.getOpcode()).str();
-	    
-	    // don't count 'meta' insns like debug info, CFI indicators
-	    // as instructions in the instruction idx counts
-	    // we are only on LLVM14, so this is the only descriptor available.
-	    const MCInstrDesc& MIDesc = MI.getDesc();
-	    if (MIDesc.isPseudo()) {
-		errs() << "MI: " << CurOpcodeName << " is pseudo insn\n";
-		continue;
-	    }
-
-	    errs() << "MI: " << CurOpcodeName << " causing insn idx increment\n";
-	    const int CurIdx = this->InstructionIdx++;
-
-	    if (!MI.mayStore()) {
-		continue;
-	    }
-	    
-	    if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
-		errs() << "hardening insn at idx " << CurIdx
-		       << " the MIR insn is: " << CurOpcodeName
-		       << " the full MI is: " << MI
-		       << '\n';
-
-		auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, CurIdx);
-		auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
-		assert(Iter != ExpectedOpcodeNames.end());
-		const std::string& ExpectedOpcode = Iter->second;
-		    
-		// If there was a mismatch, then find the originating checker
-		// alert CSV row and print it out compared to this insn.
-		if (ExpectedOpcode != CurOpcodeName) {
-		    auto IsCurCsvRow = [&](const CheckerAlertCSVLine& Row) {
-			return Row.SubName == SubName && CurIdx == Row.InsnIdx;
-		    };
-
-		    auto ErrIter = std::find_if(this->RelevantCSVLines.begin(),
-						this->RelevantCSVLines.end(),
-						IsCurCsvRow);
-		    assert(ErrIter != this->RelevantCSVLines.end());
-			
-		    errs() << "Mismatch in instruction indices in function "
-			   << SubName << '\n';
-
-		    errs() << "CSV Row was:\n";
-		    ErrIter->Print();
-		    // exit(-1);
-		}
-		
-	        this->doX86SilentStoreHardening(MI, MBB, MF);
-                doesModifyFunction = true;
-	    }
-        }
-    }
-
+  if (false && !this->shouldRunOnMachineFunction(MF)) {
     return doesModifyFunction;
+  }
+
+  llvm::errs() << "[SilentStore]\n";
+
+  std::string SubName = MF.getName().str();
+  errs() << "Hardening func: " << SubName << '\n';
+
+  bool SameSymbolNameAlreadyInstrumented =
+      FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
+  if (SameSymbolNameAlreadyInstrumented) {
+    errs() << "Trying to transform two different functions with identical "
+              "symbol names: "
+           << SubName << '\n';
+    /* assert(!SameSymbolNameAlreadyInstrumented && */
+    /*        "Trying to transform two different functions" */
+    /*        " with identical symbol names is not allowed"); */
+  }
+  FunctionsInstrumented.insert(SubName);
+
+  bool IsFirstMBB{true};
+
+  for (auto &MBB : MF) {
+    if (IsFirstMBB) {
+      errs() << "First MBB is:\n";
+      errs() << MBB << '\n';
+    }
+    for (auto &MI : MBB) {
+      DebugLoc DL = MI.getDebugLoc();
+      const auto &STI = MF.getSubtarget();
+      auto *TII = STI.getInstrInfo();
+
+      llvm::errs() << "DEBUG: " << this->InstructionIdx << " MI: " << MI
+                   << '\n';
+      std::string CurOpcodeName = TII->getName(MI.getOpcode()).str();
+
+      // don't count 'meta' insns like debug info, CFI indicators
+      // as instructions in the instruction idx counts
+      // we are only on LLVM14, so this is the only descriptor available.
+      const MCInstrDesc &MIDesc = MI.getDesc();
+      if (MIDesc.isPseudo()) {
+        errs() << "MI: " << CurOpcodeName << " is pseudo insn\n";
+        continue;
+      }
+
+      errs() << "MI: " << CurOpcodeName << " causing insn idx increment\n";
+      const int CurIdx = this->InstructionIdx++;
+
+      if (!MI.mayStore()) {
+        continue;
+      }
+
+      if (GenIndex) {
+        // increment the counter for this instruction
+        // (this is the same as the instruction idx)
+        GlobalValue *Scratch = MF.getFunction().getParent()->getNamedValue(
+            "llvm_stats" + std::to_string(CurIdx));
+        auto LoadAddr =
+            BuildMI(MBB, MI, DL, TII->get(X86::LEA64r), X86::R11)
+                .addReg(X86::RIP)
+                .addImm(1)
+                .addReg(0)
+                .addGlobalAddress(Scratch, 0, 0) // X86II::MO_GOTPCREL)
+                .addReg(0);
+
+        continue;
+      }
+
+      if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
+        errs() << "hardening insn at idx " << CurIdx
+               << " the MIR insn is: " << CurOpcodeName
+               << " the full MI is: " << MI << '\n';
+
+        auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, CurIdx);
+        auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
+        assert(Iter != ExpectedOpcodeNames.end());
+        const std::string &ExpectedOpcode = Iter->second;
+
+        // If there was a mismatch, then find the originating checker
+        // alert CSV row and print it out compared to this insn.
+        if (ExpectedOpcode != CurOpcodeName) {
+          auto IsCurCsvRow = [&](const CheckerAlertCSVLine &Row) {
+            return Row.SubName == SubName && CurIdx == Row.InsnIdx;
+          };
+
+          auto ErrIter =
+              std::find_if(this->RelevantCSVLines.begin(),
+                           this->RelevantCSVLines.end(), IsCurCsvRow);
+          assert(ErrIter != this->RelevantCSVLines.end());
+
+          errs() << "Mismatch in instruction indices in function " << SubName
+                 << '\n';
+
+          errs() << "CSV Row was:\n";
+          ErrIter->Print();
+          // exit(-1);
+        }
+        this->doX86SilentStoreHardening(MI, MBB, MF);
+        doesModifyFunction = true;
+      }
+    }
+  }
+  return doesModifyFunction;
 }
 
 bool X86_64SilentStoreMitigationPass::shouldRunOnMachineFunction(const MachineFunction& MF) {
