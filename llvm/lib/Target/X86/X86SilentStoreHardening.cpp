@@ -1852,7 +1852,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 
   bool doesModifyFunction = false;
 
-  if (false && !this->shouldRunOnMachineFunction(MF)) {
+  if (!this->shouldRunOnMachineFunction(MF)) {
     return doesModifyFunction;
   }
 
