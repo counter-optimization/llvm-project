@@ -124,7 +124,7 @@ private:
             std::istringstream StrReader(Line);
 
 	    // The row so far
-            constexpr int NumCols = 12;
+            constexpr int NumCols = 13;
             std::vector<std::string> Cols{};
 
 	    // Parser state
@@ -206,6 +206,7 @@ private:
 
 	    // Parse insn idx
 	    const std::string& InsnIdxStr = Cols.at(InsnIdxColIdx);
+llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
 	    this->InsnIdx = std::stoi(InsnIdxStr);
 
 	    // parse fn name
@@ -226,6 +227,10 @@ private:
  * harden_silentstore,harden_compsimp,harden_dmp,insn_idx
  */
 void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Filename) {
+    if (GenIndex) {
+        return;
+    }
+
     std::ifstream IFS(Filename);
 
     if (!IFS.is_open()) {
@@ -246,7 +251,8 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Fil
 			       "live_flags,"
 			       "is_live,"
 			       "alert_reason,"
-			       "description");
+			       "description,"
+                   "flags_live_in");
     bool IsHeader = true;
 
     // operator bool() on the returned this* from .getline returns 
@@ -279,8 +285,8 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Fil
 		    errs() << "Duplicate subname, idx pair with differing opcodes: "
 			   << NameIdxPair.first << ", " << NameIdxPair.second
 			   << " differs on opcodes " << ExpectedIter->second << " and " << OpcodeName << '\n';
-		    /* assert(ExpectedIter == ExpectedOpcodeNames.end() && */
-			   /* "Duplicate subname, idx pair in hardening pass"); */
+		    assert(ExpectedIter == ExpectedOpcodeNames.end() &&
+			   "Duplicate subname, idx pair in hardening pass");
 		}
 		ExpectedOpcodeNames.insert({ NameIdxPair, OpcodeName });
 
@@ -338,7 +344,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   // create machine operand metadata
   /* auto *TempSymMO = MF.getContext().createTempSymbolMDNode(TempSym); */
   /* auto *DbgLabel = MBB.getParent()->getSubprogram()->createDebugLocLabel(DL); */
-    bool OpcodeSupported = true;
+  bool OpcodeSupported = true;
 
   switch (MI.getOpcode()) {
   case X86::MOV8mr:
@@ -1852,7 +1858,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 
   bool doesModifyFunction = false;
 
-  if (!this->shouldRunOnMachineFunction(MF)) {
+  if (!GenIndex && !this->shouldRunOnMachineFunction(MF)) {
     return doesModifyFunction;
   }
 
@@ -1867,14 +1873,14 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     errs() << "Trying to transform two different functions with identical "
               "symbol names: "
            << SubName << '\n';
-    /* assert(!SameSymbolNameAlreadyInstrumented && */
-    /*        "Trying to transform two different functions" */
-    /*        " with identical symbol names is not allowed"); */
+    assert(!SameSymbolNameAlreadyInstrumented &&
+           "Trying to transform two different functions"
+           " with identical symbol names is not allowed");
   }
   FunctionsInstrumented.insert(SubName);
 
   bool IsFirstMBB{true};
-
+  int InstructionIdx = 0;
   for (auto &MBB : MF) {
     if (IsFirstMBB) {
       errs() << "First MBB is:\n";
@@ -1885,7 +1891,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
       const auto &STI = MF.getSubtarget();
       auto *TII = STI.getInstrInfo();
 
-      llvm::errs() << "DEBUG: " << this->InstructionIdx << " MI: " << MI
+      llvm::errs() << "DEBUG: " << InstructionIdx << " MI: " << MI
                    << '\n';
       std::string CurOpcodeName = TII->getName(MI.getOpcode()).str();
 
@@ -1903,20 +1909,13 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
       }
 
       errs() << "MI: " << CurOpcodeName << " causing insn idx increment\n";
-      const int CurIdx = this->InstructionIdx++;
+      int CurIdx = InstructionIdx++;
 
       if (GenIndex) {
-        // increment the counter for this instruction
-        // (this is the same as the instruction idx)
-        GlobalValue *Scratch = MF.getFunction().getParent()->getNamedValue(
-            "llvm_stats" + std::to_string(CurIdx));
-        auto LoadAddr =
-            BuildMI(MBB, MI, DL, TII->get(X86::LEA64r), X86::R11)
-                .addReg(X86::RIP)
-                .addImm(1)
-                .addReg(0)
-                .addGlobalAddress(Scratch, 0, 0) // X86II::MO_GOTPCREL)
-                .addReg(0);
+        // SBB R11 with CurIdx
+        BuildMI(MBB, MI, DL, TII->get(X86::SBB64ri32), X86::R11)
+            .addReg(X86::R11)
+            .addImm(CurIdx);
 
         continue;
       }
@@ -1933,7 +1932,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 
         // If there was a mismatch, then find the originating checker
         // alert CSV row and print it out compared to this insn.
-        if (ExpectedOpcode != CurOpcodeName) {
+        if (CurOpcodeName.find(ExpectedOpcode) == std::string::npos) {
           auto IsCurCsvRow = [&](const CheckerAlertCSVLine &Row) {
             return Row.SubName == SubName && CurIdx == Row.InsnIdx;
           };
@@ -1946,6 +1945,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
           errs() << "Mismatch in instruction indices in function " << SubName
                  << '\n';
 
+          assert(false && "Mismatch in instruction indices");
           errs() << "CSV Row was:\n";
           ErrIter->Print();
           // exit(-1);

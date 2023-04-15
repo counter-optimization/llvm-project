@@ -50,6 +50,7 @@ bool InsertScratchGlobals::insertFuncDecl() {
 }
 
 bool InsertScratchGlobals::run() {
+  return false;
   // if (!EnableGlobalScratch) {
   //   return false;
   // }
@@ -60,7 +61,6 @@ bool InsertScratchGlobals::run() {
     GlobalVariable *Scratch =
         new GlobalVariable(F, I32, false, GlobalValue::WeakAnyLinkage, Init);
     Scratch->setName("llvm_stats" + std::to_string(i));
-    Scratch->dump();
   }
   return false;
 }
