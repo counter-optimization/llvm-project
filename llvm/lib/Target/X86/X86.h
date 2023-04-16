@@ -15,6 +15,7 @@
 #define LLVM_LIB_TARGET_X86_X86_H
 
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/CommandLine.h"
 
 namespace llvm {
 
@@ -156,6 +157,8 @@ FunctionPass *createX86SpeculativeExecutionSideEffectSuppression();
 // FunctionPass *createX86MachineInstrPrinterPass();
 FunctionPass* createX86_64SilentStoreMitigationPass();
 FunctionPass* createX86_64CompSimpMitigationPass();
+FunctionPass* createX86_64MitigationIdxPass();
+FunctionPass* createX86_64MitigationDeIdxPass();
 
 void initializeEvexToVexInstPassPass(PassRegistry &);
 void initializeFixupBWInstPassPass(PassRegistry &);
@@ -186,6 +189,8 @@ void initializeX86LowerTileCopyPass(PassRegistry &);
 void initializeX86LowerAMXIntrinsicsLegacyPassPass(PassRegistry &);
 void initializeX86_64SilentStoreMitigationPassPass(PassRegistry &);
 void initializeX86_64CompSimpMitigationPassPass(PassRegistry &);
+void initializeX86_64MitigationIdxPassPass(PassRegistry &);
+void initializeX86_64MitigationDeIdxPassPass(PassRegistry &);
 // void initializeX86MachineInstrPrinterPass(PassRegistry &);
 
 namespace X86AS {

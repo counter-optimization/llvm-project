@@ -39,13 +39,13 @@ static cl::opt<bool> EnableSilentStore("x86-ss",
                         cl::desc("Enable the X86 silent store mitigation."),
                         cl::init(false));
 
-static cl::opt<bool> GenIndex("x86-gen-idx",
-                        cl::desc("Generate global indices for silent store instrumentation"),
-                        cl::init(false));
-
 static cl::opt<std::string> SilentStoreCSVPath("x86-ss-csv-path",
                         cl::desc("X86 silent store csv path."),
                         cl::init("test_alert.csv"));
+
+static cl::opt<bool> GenIndex("x86-gen-idx-ss",
+                        cl::desc("Generate global indices for silent store instrumentation"),
+                        cl::init(false));
 
 namespace {
 
@@ -69,16 +69,17 @@ public:
     }
 
     bool shouldRunOnInstructionIdx(const std::string& SubName, const int CurIdx) const {
-	auto FoundIter = IndicesToInstrument.find(SubName);
-	bool SubRequiresInstrumenting = FoundIter != IndicesToInstrument.end();
-	assert(SubRequiresInstrumenting &&
-	       "Trying to instrument sub that doesn't require instrumenting (not in flagged CSV records)");
+      auto FoundIter = IndicesToInstrument.find(SubName);
+      bool SubRequiresInstrumenting = FoundIter != IndicesToInstrument.end();
+      assert(SubRequiresInstrumenting &&
+             "Trying to instrument sub that doesn't require instrumenting (not "
+             "in flagged CSV records)");
 
-	const std::set<int>& Indices = FoundIter->second;
-	auto IndicesIter = Indices.find(CurIdx);
-	bool IdxRequiresInstrumenting = IndicesIter != Indices.end();
-	
-	return IdxRequiresInstrumenting;
+      const std::set<int> &Indices = FoundIter->second;
+      auto IndicesIter = Indices.find(CurIdx);
+      bool IdxRequiresInstrumenting = IndicesIter != Indices.end();
+
+      return IdxRequiresInstrumenting;
     }
 
 private:
@@ -207,7 +208,12 @@ private:
 	    // Parse insn idx
 	    const std::string& InsnIdxStr = Cols.at(InsnIdxColIdx);
 llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
-	    this->InsnIdx = std::stoi(InsnIdxStr);
+        if (!InsnIdxStr.empty()) {
+            this->InsnIdx = std::stoi(InsnIdxStr);
+        } else {
+            llvm::errs() << "Unsupported CSV line: " << Line << "\n";
+            this->InsnIdx = -1;
+        }
 
 	    // parse fn name
 	    this->SubName = Cols.at(SubNameColIdx);
@@ -1879,79 +1885,66 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
   }
   FunctionsInstrumented.insert(SubName);
 
-  bool IsFirstMBB{true};
-  int InstructionIdx = 0;
   for (auto &MBB : MF) {
-    if (IsFirstMBB) {
-      errs() << "First MBB is:\n";
-      errs() << MBB << '\n';
-    }
-    for (auto &MI : MBB) {
+    llvm::errs() << "Checking basic block " << MBB << "\n";
+    for (llvm::MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
+         I != E; ++I) {
+      llvm::MachineInstr &MI = *I;
       DebugLoc DL = MI.getDebugLoc();
       const auto &STI = MF.getSubtarget();
       auto *TII = STI.getInstrInfo();
+      
+      llvm::errs() << "Checking instruction " << MI << "\n";
 
-      llvm::errs() << "DEBUG: " << InstructionIdx << " MI: " << MI
+      if (MI.getOpcode() == X86::SBB64ri32) {
+        int CurIdx = MI.getOperand(2).getImm();
+
+        llvm::errs() << "Found SBB64ri32 instruction at index " << CurIdx << "\n";
+
+        if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
+          I++;
+          llvm::MachineInstr &NextMI = *I;
+
+          llvm::errs() << "Found instruction " << NextMI << "\n";
+
+          std::string CurOpcodeName = TII->getName(NextMI.getOpcode()).str();
+          // don't count 'meta' insns like debug info, CFI indicators
+          // as instructions in the instruction idx counts
+          // we are only on LLVM14, so this is the only descriptor available.
+          const MCInstrDesc &MIDesc = NextMI.getDesc();
+
+          errs() << "hardening insn at idx " << CurIdx
+                 << " the MIR insn is: " << CurOpcodeName
+                 << " the full MI is: " << NextMI << '\n';
+
+          auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, CurIdx);
+          auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
+          assert(Iter != ExpectedOpcodeNames.end());
+          const std::string &ExpectedOpcode = Iter->second;
+
+          // If there was a mismatch, then find the originating checker
+          // alert CSV row and print it out compared to this insn.
+          if (CurOpcodeName.find(ExpectedOpcode) == std::string::npos) {
+            auto IsCurCsvRow = [&](const CheckerAlertCSVLine &Row) {
+              return Row.SubName == SubName && CurIdx == Row.InsnIdx;
+            };
+
+            auto ErrIter =
+                std::find_if(this->RelevantCSVLines.begin(),
+                             this->RelevantCSVLines.end(), IsCurCsvRow);
+            assert(ErrIter != this->RelevantCSVLines.end());
+
+            errs() << "Mismatch in instruction indices in function " << SubName
                    << '\n';
-      std::string CurOpcodeName = TII->getName(MI.getOpcode()).str();
 
-      // don't count 'meta' insns like debug info, CFI indicators
-      // as instructions in the instruction idx counts
-      // we are only on LLVM14, so this is the only descriptor available.
-      const MCInstrDesc &MIDesc = MI.getDesc();
-      if (MIDesc.isPseudo()) {
-        errs() << "MI: " << CurOpcodeName << " is pseudo insn\n";
-        continue;
-      }
-
-      if (!MI.mayStore()) {
-        continue;
-      }
-
-      errs() << "MI: " << CurOpcodeName << " causing insn idx increment\n";
-      int CurIdx = InstructionIdx++;
-
-      if (GenIndex) {
-        // SBB R11 with CurIdx
-        BuildMI(MBB, MI, DL, TII->get(X86::SBB64ri32), X86::R11)
-            .addReg(X86::R11)
-            .addImm(CurIdx);
-
-        continue;
-      }
-
-      if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
-        errs() << "hardening insn at idx " << CurIdx
-               << " the MIR insn is: " << CurOpcodeName
-               << " the full MI is: " << MI << '\n';
-
-        auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, CurIdx);
-        auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
-        assert(Iter != ExpectedOpcodeNames.end());
-        const std::string &ExpectedOpcode = Iter->second;
-
-        // If there was a mismatch, then find the originating checker
-        // alert CSV row and print it out compared to this insn.
-        if (CurOpcodeName.find(ExpectedOpcode) == std::string::npos) {
-          auto IsCurCsvRow = [&](const CheckerAlertCSVLine &Row) {
-            return Row.SubName == SubName && CurIdx == Row.InsnIdx;
-          };
-
-          auto ErrIter =
-              std::find_if(this->RelevantCSVLines.begin(),
-                           this->RelevantCSVLines.end(), IsCurCsvRow);
-          assert(ErrIter != this->RelevantCSVLines.end());
-
-          errs() << "Mismatch in instruction indices in function " << SubName
-                 << '\n';
-
-          assert(false && "Mismatch in instruction indices");
-          errs() << "CSV Row was:\n";
-          ErrIter->Print();
-          // exit(-1);
+            assert(false && "Mismatch in instruction indices");
+            errs() << "CSV Row was:\n";
+            ErrIter->Print();
+            // exit(-1);
+          }
+          this->doX86SilentStoreHardening(NextMI, MBB, MF);
+          doesModifyFunction = true;
         }
-        this->doX86SilentStoreHardening(MI, MBB, MF);
-        doesModifyFunction = true;
       }
     }
   }

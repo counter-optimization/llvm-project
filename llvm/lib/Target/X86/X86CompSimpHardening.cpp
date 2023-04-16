@@ -21,6 +21,9 @@
 
 #include "cmath"
 #include "llvm/Pass.h"
+#include <fstream>
+#include <sstream>
+#include <string>
 
 // TODO: replace all the following uses with the new def
 
@@ -58,7 +61,29 @@ public:
     return "computation simplication mitigations";
   }
 
+  bool shouldRunOnInstructionIdx(const std::string &SubName,
+                                 const int CurIdx) const {
+    auto FoundIter = IndicesToInstrument.find(SubName);
+    bool SubRequiresInstrumenting = FoundIter != IndicesToInstrument.end();
+    assert(SubRequiresInstrumenting &&
+           "Trying to instrument sub that doesn't require instrumenting (not "
+           "in flagged CSV records)");
+
+    const std::set<int> &Indices = FoundIter->second;
+    auto IndicesIter = Indices.find(CurIdx);
+    bool IdxRequiresInstrumenting = IndicesIter != Indices.end();
+
+    return IdxRequiresInstrumenting;
+  }
+
 private:
+  inline static bool CSVFileAlreadyParsed{};
+  inline static std::map<std::string, std::set<int>> IndicesToInstrument;
+  inline static std::map<std::pair<std::string, int>, std::string>
+      ExpectedOpcodeNames;
+  inline static std::set<std::string> FunctionsToInstrument;
+  inline static std::set<std::string> FunctionsInstrumented;
+
   void doX86CompSimpHardening(MachineInstr *MI);
   void subFallBack(MachineInstr *MI);
   Register get64BitReg(MachineOperand *MO, const TargetRegisterInfo *TRI);
@@ -130,8 +155,214 @@ private:
   void insertSafeMul32rBefore(MachineInstr *MI);
   void insertSafeAdd64RR(MachineInstr *MI, MachineOperand *Op1,
                          MachineOperand *Op2);
+  void readCheckerAlertCSV(const std::string &Filename);
+  struct CheckerAlertCSVLine {
+    std::string SubName{};
+    std::string OpcodeName{};
+    std::string Addr{};
+    bool IsSilentStore{};
+    bool IsCompSimp{};
+    int InsnIdx{};
+
+    void Print() const noexcept {
+      errs() << "CSV ROW:\n";
+      errs() << "\tSubName: " << this->SubName << '\n';
+      errs() << "\tOpcodeName: " << this->OpcodeName << '\n';
+      errs() << "\tAddr: " << this->Addr << '\n';
+      errs() << "\tIsSilentStore: " << this->IsSilentStore << '\n';
+      errs() << "\tIsCompSimp: " << this->IsCompSimp << '\n';
+      errs() << "\tInsnIdx: " << this->InsnIdx << '\n';
+    }
+
+    explicit CheckerAlertCSVLine(const std::string &Line) {
+      std::istringstream StrReader(Line);
+
+      // The row so far
+      constexpr int NumCols = 13;
+      std::vector<std::string> Cols{};
+
+      // Parser state
+      int ColsRead = 0;
+      std::vector<char> ColChars;
+      bool InQuotedString = false;
+      char CurChar{};
+      bool LineEnded = false;
+      std::string Col{};
+
+      while (!LineEnded) {
+        CurChar = StrReader.get();
+
+        switch (CurChar) {
+        case '"':
+          InQuotedString = !InQuotedString;
+          break;
+        case '\n':
+        case ',':
+        case -1:
+          if (InQuotedString) {
+            ColChars.push_back(CurChar);
+          } else {
+            ++ColsRead;
+
+            if (ColChars.size() == 0) {
+              Col = std::string("");
+            } else {
+              Col = std::string(ColChars.begin(), ColChars.end());
+            }
+
+            ColChars.clear();
+            Cols.push_back(Col);
+
+            if (CurChar == '\n' || CurChar == -1) {
+              LineEnded = true;
+            }
+          }
+          break;
+        default:
+          ColChars.push_back(CurChar);
+          break;
+        }
+
+        if (!StrReader.good()) {
+          if (StrReader.eof()) {
+            assert(NumCols == ColsRead && LineEnded &&
+                   "Error reading checker alert CSV file, EOF in middle of CSV "
+                   "row");
+            break;
+          } else if (StrReader.fail() || StrReader.bad()) {
+            assert(false &&
+                   "Error reading checker alert CSV file, str read failed");
+          }
+        }
+      }
+
+      assert(NumCols == ColsRead && "Checker alert CSV col header mismatch.");
+
+      constexpr int SubNameColIdx = 0;
+      constexpr int OpcodeNameColIdx = 1;
+      constexpr int AddrColIdx = 2;
+      constexpr int InsnIdxColIdx = 3;
+      constexpr int AlertReasonColIdx = 10;
+
+      // Parse LLVM MIR opcode name (only used for debugging)
+      const std::string &OpcodeName = Cols.at(OpcodeNameColIdx);
+      this->OpcodeName = OpcodeName;
+
+      // Parse: is silent store or comp simp?
+      const std::string &AlertReason = Cols.at(AlertReasonColIdx);
+      if (AlertReason == "comp-simp") {
+        this->IsCompSimp = true;
+      }
+
+      if (AlertReason == "silent-stores") {
+        this->IsSilentStore = true;
+      }
+
+      this->Addr = Cols.at(AddrColIdx);
+
+      // Parse insn idx
+      const std::string &InsnIdxStr = Cols.at(InsnIdxColIdx);
+      llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
+      this->InsnIdx = std::stoi(InsnIdxStr);
+
+      // parse fn name
+      this->SubName = Cols.at(SubNameColIdx);
+    }
+  };
+  bool isRelevantCheckerAlertCSVLine(const CheckerAlertCSVLine &Line);
+  std::vector<CheckerAlertCSVLine> RelevantCSVLines{};
 };
 } // end anonymous namespace
+
+bool X86_64CompSimpMitigationPass::isRelevantCheckerAlertCSVLine(
+    const CheckerAlertCSVLine &Line) {
+  return Line.IsCompSimp;
+}
+
+/*
+ * The CSV file has the following header:
+ * harden_silentstore,harden_compsimp,harden_dmp,insn_idx
+ */
+void X86_64CompSimpMitigationPass::readCheckerAlertCSV(
+    const std::string &Filename) {
+
+  std::ifstream IFS(Filename);
+
+  if (!IFS.is_open()) {
+    errs() << "Couldn't open file " << Filename << " from checker.\n";
+    assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
+  }
+
+  constexpr size_t MaxLineSize = 1024;
+  std::array<char, MaxLineSize> Line{0};
+  std::string ExpectedHeader("subroutine_name,"
+                             "mir_opcode,"
+                             "addr,"
+                             "rpo_idx,"
+                             "tid,"
+                             "problematic_operands,"
+                             "left_operand,"
+                             "right_operand,"
+                             "live_flags,"
+                             "is_live,"
+                             "alert_reason,"
+                             "description,"
+                             "flags_live_in");
+  bool IsHeader = true;
+
+  // operator bool() on the returned this* from .getline returns
+  // false. i think it returns false when EOF is hit?
+  // -1 for null terminator
+  while (IFS.getline(Line.data(), MaxLineSize - 1)) {
+    std::string CurrentLine(Line.data());
+
+    if (IsHeader) {
+      assert(ExpectedHeader == CurrentLine &&
+             "Unexpected header in checker alert csv file");
+      IsHeader = false;
+    } else {
+      CheckerAlertCSVLine CSVLine(CurrentLine);
+
+      if (this->isRelevantCheckerAlertCSVLine(CSVLine)) {
+        this->RelevantCSVLines.push_back(CSVLine);
+
+        const std::string &SubName = CSVLine.SubName;
+        const std::string &OpcodeName = CSVLine.OpcodeName;
+        int InsnIdx = CSVLine.InsnIdx;
+
+        FunctionsToInstrument.insert(CSVLine.SubName);
+
+        /* add map of (SubName, InsnIdx) -> ExpectedOpcodeNameString for faster
+         * checking later */
+        std::pair<std::string, int> NameIdxPair =
+            std::pair<std::string, int>(SubName, InsnIdx);
+        auto ExpectedIter = ExpectedOpcodeNames.find(NameIdxPair);
+        if (ExpectedIter != ExpectedOpcodeNames.end() &&
+            ExpectedIter->second != OpcodeName) {
+          errs() << "Duplicate subname, idx pair with differing opcodes: "
+                 << NameIdxPair.first << ", " << NameIdxPair.second
+                 << " differs on opcodes " << ExpectedIter->second << " and "
+                 << OpcodeName << '\n';
+          assert(ExpectedIter == ExpectedOpcodeNames.end() &&
+                 "Duplicate subname, idx pair in hardening pass");
+        }
+        ExpectedOpcodeNames.insert({NameIdxPair, OpcodeName});
+
+        auto IdxIter = IndicesToInstrument.find(SubName);
+        if (IdxIter == IndicesToInstrument.end()) {
+          std::set<int> FreshSet{};
+          FreshSet.insert(InsnIdx);
+          IndicesToInstrument[SubName] = FreshSet;
+        } else {
+          std::set<int> &Indices = IdxIter->second;
+          Indices.insert(InsnIdx);
+        }
+      }
+    }
+
+    Line.fill(0);
+  }
+}
 
 Register get64BitReg(MachineOperand *MO, const TargetRegisterInfo *TRI) {}
 
@@ -1056,7 +1287,12 @@ void X86_64CompSimpMitigationPass::insertSafeXor8rmBefore(MachineInstr *MI) {
 
   assert(MOp1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp2).add(MOp3).add(MOp4).add(MOp5).add(MOp6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5)
+      .add(MOp6);
 
   auto Op1 = MOp1.getReg();
   auto Op2 = X86::R13B;
@@ -1370,7 +1606,12 @@ void X86_64CompSimpMitigationPass::insertSafeXor64rmBefore(MachineInstr *MI) {
 
   assert(MOp1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp2).add(MOp3).add(MOp4).add(MOp5).add(MOp6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5)
+      .add(MOp6);
 
   auto Op1 = MOp1.getReg();
   auto Op2 = X86::R13;
@@ -1538,7 +1779,12 @@ void X86_64CompSimpMitigationPass::insertSafeXor32rmBefore(MachineInstr *MI) {
 
   assert(MOp1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp2).add(MOp3).add(MOp4).add(MOp5).add(MOp6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5)
+      .add(MOp6);
 
   auto Op1 = MOp1.getReg();
   auto Op2 = X86::R13D;
@@ -1712,7 +1958,12 @@ void X86_64CompSimpMitigationPass::insertSafeOr64rmBefore(MachineInstr *MI) {
 
   assert(MOp1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp2).add(MOp3).add(MOp4).add(MOp5).add(MOp6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5)
+      .add(MOp6);
 
   auto Op1 = MOp1.getReg();
   auto Op2 = X86::R13;
@@ -2594,79 +2845,79 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1_16).addReg(X86::R11W);
 }
 
- void X86_64CompSimpMitigationPass::insertSafeMul32rBefore(MachineInstr *MI) {
-   MachineBasicBlock *MBB = MI->getParent();
-   MachineFunction *MF = MBB->getParent();
-   DebugLoc DL = MI->getDebugLoc();
-   const auto &STI = MF->getSubtarget();
-   auto *TII = STI.getInstrInfo();
-   auto *TRI = STI.getRegisterInfo();
-   auto &MRI = MF->getRegInfo();
+void X86_64CompSimpMitigationPass::insertSafeMul32rBefore(MachineInstr *MI) {
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
 
-   MachineOperand &MOp1 = MI->getOperand(1);
-   Register ECX = MOp1.getReg();
-   Register RCX =
-       TRI->getMatchingSuperReg(ECX, X86::sub_32bit, &X86::GR64RegClass);
+  MachineOperand &MOp1 = MI->getOperand(1);
+  Register ECX = MOp1.getReg();
+  Register RCX =
+      TRI->getMatchingSuperReg(ECX, X86::sub_32bit, &X86::GR64RegClass);
 
-   /*
-    mov64 rdx  (expt 2 63)
-    mov32 r10d ecx
-    sub64 r10 rdx
-    mov32 r11d eax
-    sub64 r11 rdx
-    mov64 rax r11
-    mul64 r10
-    shl64 r10 63
-    mov8 r10b 1
-    shl64 r11 63
-    mov8 r11b 1
-    mov8 dl al
-    mov8 al 2
-    sub64 rax r10
-    sub64 rax r11
-    mov8 al dl
-    mov64 rdx rax
-    mov16 dx 1 (16-bit)
-    shr64 rdx 32
-    mov32 eax eax
+  /*
+   mov64 rdx  (expt 2 63)
+   mov32 r10d ecx
+   sub64 r10 rdx
+   mov32 r11d eax
+   sub64 r11 rdx
+   mov64 rax r11
+   mul64 r10
+   shl64 r10 63
+   mov8 r10b 1
+   shl64 r11 63
+   mov8 r11b 1
+   mov8 dl al
+   mov8 al 2
+   sub64 rax r10
+   sub64 rax r11
+   mov8 al dl
+   mov64 rdx rax
+   mov16 dx 1 (16-bit)
+   shr64 rdx 32
+   mov32 eax eax
 
-    mul32 ecx => mul32 eax ecx
-   */
+   mul32 ecx => mul32 eax ecx
+  */
 
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::RDX).addImm(pow(2, 63));
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10D).addReg(ECX);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R10)
-       .addReg(X86::R10)
-       .addReg(ECX);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R11D).addReg(X86::EAX);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R11)
-       .addReg(X86::R11)
-       .addReg(X86::RDX);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R11);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MUL64r)).addReg(X86::R10);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
-       .addReg(X86::R10)
-       .addImm(63);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R10B).addImm(1);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R11)
-       .addReg(X86::R11)
-       .addImm(63);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R11B).addImm(1);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::DL).addReg(X86::AL);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL).addImm(2);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::RAX)
-       .addReg(X86::RAX)
-       .addReg(X86::R10);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::RAX)
-       .addReg(X86::RAX)
-       .addReg(X86::R11);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL).addReg(X86::DL);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RDX).addReg(X86::RAX);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::DX).addImm(1);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), X86::RDX)
-       .addReg(X86::RDX)
-       .addImm(32);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::EAX).addReg(X86::EAX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::RDX).addImm(pow(2, 63));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10D).addReg(ECX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R10)
+      .addReg(X86::R10)
+      .addReg(ECX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R11D).addReg(X86::EAX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R11)
+      .addReg(X86::R11)
+      .addReg(X86::RDX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MUL64r)).addReg(X86::R10);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
+      .addReg(X86::R10)
+      .addImm(63);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R10B).addImm(1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R11)
+      .addReg(X86::R11)
+      .addImm(63);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R11B).addImm(1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::DL).addReg(X86::AL);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL).addImm(2);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::RAX)
+      .addReg(X86::RAX)
+      .addReg(X86::R10);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::RAX)
+      .addReg(X86::RAX)
+      .addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL).addReg(X86::DL);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RDX).addReg(X86::RAX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::DX).addImm(1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), X86::RDX)
+      .addReg(X86::RDX)
+      .addImm(32);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::EAX).addReg(X86::EAX);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAdc64rmBefore(MachineInstr *MI) {
@@ -2997,7 +3248,12 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64mi32Before(MachineInstr *MI) {
   MachineOperand MOp6 = MI->getOperand(6);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R14).add(MOp6);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(MOp1)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5);
 
   auto Op3 = X86::R13;
   auto Op4 = X86::R14;
@@ -3374,7 +3630,12 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64mrBefore(MachineInstr *MI) {
 
   assert(MOp6.isReg() && "Op6 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(MOp1)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5);
 
   auto Op4 = MOp6.getReg();
   auto Op3 = X86::R13;
@@ -3443,7 +3704,13 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64mrBefore(MachineInstr *MI) {
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op4_16).addReg(X86::R11W);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr)).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5).addReg(X86::R13);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+      .add(MOp1)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5)
+      .addReg(X86::R13);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAdd64mrBefore(MachineInstr *MI) {
@@ -3474,7 +3741,12 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64mrBefore(MachineInstr *MI) {
 
   assert(MOp6.isReg() && "Op6 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(MOp1)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5);
 
   auto Op4 = MOp6.getReg();
   auto Op3 = X86::R13;
@@ -3543,7 +3815,13 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64mrBefore(MachineInstr *MI) {
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op4_16).addReg(X86::R11W);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr)).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5).addReg(X86::R13);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+      .add(MOp1)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5)
+      .addReg(X86::R13);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAdd64rmBefore(MachineInstr *MI) {
@@ -3573,7 +3851,12 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64rmBefore(MachineInstr *MI) {
 
   assert(Op1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(Op2).add(Op3).add(Op4).add(Op5).add(Op6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(Op2)
+      .add(Op3)
+      .add(Op4)
+      .add(Op5)
+      .add(Op6);
 
   auto Op7 = Op1.getReg();
   auto Op8 = X86::R13;
@@ -3768,7 +4051,12 @@ void X86_64CompSimpMitigationPass::insertSafeSub64rmBefore(MachineInstr *MI) {
 
   assert(MOp1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp2).add(MOp3).add(MOp4).add(MOp5).add(MOp6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5)
+      .add(MOp6);
 
   auto Op1 = MOp1.getReg();
   auto Op2 = X86::R13;
@@ -4073,7 +4361,12 @@ void X86_64CompSimpMitigationPass::insertSafeAdd32rmBefore(MachineInstr *MI) {
 
   assert(MOp1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rm), X86::R13).add(MOp2).add(MOp3).add(MOp4).add(MOp5).add(MOp6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rm), X86::R13)
+      .add(MOp2)
+      .add(MOp3)
+      .add(MOp4)
+      .add(MOp5)
+      .add(MOp6);
 
   auto R1 = MOp1.getReg();
   auto R2 = X86::R13D;
@@ -5191,8 +5484,7 @@ static void setupTest(MachineFunction &MF) {
           BuildMI(*MBB, &MI, DL, TII->get(X86::SAR32r1), X86::ECX)
               .addReg(X86::ECX);
         if (Op == "MUL32r")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::MUL32r))
-              .addReg(X86::ECX);
+          BuildMI(*MBB, &MI, DL, TII->get(X86::MUL32r)).addReg(X86::ECX);
 
         // TODO
         // ADD32i32
@@ -5210,33 +5502,103 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
     return false;
 
   if (MF.getName().startswith("x86compsimptest")) {
-      setupTest(MF);
+    setupTest(MF);
   }
 
   if (MF.getName().endswith("-original")) {
-      return false;
+    return false;
   }
 
-  if (false && !shouldRunOnMachineFunction(MF)) {
+  /* static class member: don't reparse the CSV file on each MachineFunction
+     in the compilation unit */
+  if (!CSVFileAlreadyParsed) {
+    this->readCheckerAlertCSV(CompSimpCSVPath);
+    CSVFileAlreadyParsed = true;
+  }
+
+  if (!shouldRunOnMachineFunction(MF)) {
     return false; // Doesn't modify the func if not running
   }
+
   bool doesModifyFunction{false};
+  std::string SubName = MF.getName().str();
+  bool SameSymbolNameAlreadyInstrumented =
+      FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
+  if (SameSymbolNameAlreadyInstrumented) {
+    errs() << "Trying to transform two different functions with identical "
+              "symbol names: "
+           << SubName << '\n';
+    assert(!SameSymbolNameAlreadyInstrumented &&
+           "Trying to transform two different functions"
+           " with identical symbol names is not allowed");
+  }
+  FunctionsInstrumented.insert(SubName);
 
   std::vector<MachineInstr *> Instructions;
   for (auto &MBB : MF) {
-    for (auto &MI : MBB) {
-      // Don't harden frame setup stuff like `push rbp`
-      if (!MI.getFlag(MachineInstr::MIFlag::FrameSetup)) {
-        Instructions.push_back(&MI);
-        doesModifyFunction = true; // Modifies the func if it does run
+    for (llvm::MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
+         I != E; ++I) {
+      llvm::MachineInstr &MI = *I;
+      DebugLoc DL = MI.getDebugLoc();
+      const auto &STI = MF.getSubtarget();
+      auto *TII = STI.getInstrInfo();
+
+      if (MI.getOpcode() == X86::SBB64ri32) {
+        int CurIdx = MI.getOperand(2).getImm();
+
+        if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
+          I++;
+          MachineInstr &NextMI = *I;
+          std::string CurOpcodeName = TII->getName(NextMI.getOpcode()).str();
+          errs() << "hardening insn at idx " << CurIdx
+                 << " the MIR insn is: " << CurOpcodeName
+                 << " the full MI is: " << NextMI << '\n';
+
+          // don't count 'meta' insns like debug info, CFI indicators
+          // as instructions in the instruction idx counts
+          // we are only on LLVM14, so this is the only descriptor available.
+          const MCInstrDesc &MIDesc = NextMI.getDesc();
+
+          if (NextMI.getFlag(MachineInstr::MIFlag::FrameSetup)) {
+            continue;
+          }
+
+          auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, CurIdx);
+          auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
+          assert(Iter != ExpectedOpcodeNames.end());
+          const std::string &ExpectedOpcode = Iter->second;
+
+          // If there was a mismatch, then find the originating checker
+          // alert CSV row and print it out compared to this insn.
+          if (CurOpcodeName.find(ExpectedOpcode) == std::string::npos) {
+            auto IsCurCsvRow = [&](const CheckerAlertCSVLine &Row) {
+              return Row.SubName == SubName && CurIdx == Row.InsnIdx;
+            };
+
+            auto ErrIter =
+                std::find_if(this->RelevantCSVLines.begin(),
+                             this->RelevantCSVLines.end(), IsCurCsvRow);
+            assert(ErrIter != this->RelevantCSVLines.end());
+
+            errs() << "Mismatch in instruction indices in function " << SubName
+                   << '\n';
+
+            assert(false && "Mismatch in instruction indices");
+            errs() << "CSV Row was:\n";
+            ErrIter->Print();
+            // exit(-1);
+          }
+          llvm::errs() << "Transforming instruction at idx " << CurIdx << "\n";
+          Instructions.push_back(&MI);
+          doesModifyFunction = true;
+        }
       }
     }
   }
-  // if(Instructions.size() > 0) MF.print(llvm::errs());
+
   for (MachineInstr *MI : Instructions) {
     doX86CompSimpHardening(MI);
   }
-  // if(Instructions.size() > 0) MF.print(llvm::errs());
   return doesModifyFunction;
 }
 
@@ -5244,14 +5606,10 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
 // function names.
 bool X86_64CompSimpMitigationPass::shouldRunOnMachineFunction(
     MachineFunction &MF) {
-  Function &F = MF.getFunction();
-
-  for (auto &Arg : F.args()) {
-    if (Arg.hasAttribute(Attribute::Secret)) {
-      return true;
-    }
-  }
-  return false;
+  const std::string FuncName = MF.getName().str();
+  auto FuncsIter = FunctionsToInstrument.find(FuncName);
+  bool FoundFunction = FuncsIter != FunctionsToInstrument.end();
+  return FoundFunction;
 }
 
 char X86_64CompSimpMitigationPass::ID = 0;
