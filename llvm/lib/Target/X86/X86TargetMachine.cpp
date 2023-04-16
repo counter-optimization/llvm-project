@@ -101,6 +101,8 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   initializePseudoProbeInserterPass(PR);
   initializeX86_64SilentStoreMitigationPassPass(PR);
   initializeX86_64CompSimpMitigationPassPass(PR);
+  initializeX86_64MitigationIdxPassPass(PR);
+  initializeX86_64MitigationDeIdxPassPass(PR);
   // initializeX86MachineInstrPrinterPass(PR);
 }
 
@@ -613,6 +615,7 @@ void X86PassConfig::addPreEmitPass2() {
              M->getFunction("objc_unsafeClaimAutoreleasedReturnValue");
     }));
 
+  addPass(createX86_64MitigationIdxPass());
   if (SSCSOrder) {
     addPass(createX86_64SilentStoreMitigationPass());
     addPass(createX86_64CompSimpMitigationPass());
@@ -623,6 +626,7 @@ void X86PassConfig::addPreEmitPass2() {
     addPass(createX86_64SilentStoreMitigationPass());
     addPass(createX86_64CompSimpMitigationPass());
   }
+  addPass(createX86_64MitigationDeIdxPass());
 
   // addPass(createX86MachineInstrPrinterPass());
 }
