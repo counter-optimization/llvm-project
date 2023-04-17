@@ -2923,8 +2923,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
   HS = &getAnalysis<HandlesSecretsWrapperPass>();
 
-  errs() << "In RegAllocGreedy, Function " << MF->getName() << " handles secrets?: ";
-  errs() << HS->functionHandlesSecrets() << '\n';
+  // errs() << "In RegAllocGreedy, Function " << MF->getName() << " handles secrets?: ";
+  // errs() << HS->functionHandlesSecrets() << '\n';
 
   initializeCSRCost();  
 

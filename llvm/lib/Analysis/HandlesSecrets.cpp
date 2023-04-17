@@ -1,3 +1,7 @@
+#include <fstream>
+#include <string>
+#include <cassert>
+
 #include "llvm/Analysis/HandlesSecrets.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringSet.h"
@@ -79,51 +83,27 @@ void HandlesSecretsWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool HandlesSecretsWrapperPass::runOnFunction(Function &F) {
+    std::string FuncName(F.getName());
+    std::string FuncSecretsFileName(FuncName);
+    FuncSecretsFileName.append(".");
+    FuncSecretsFileName.append(this->SecretsFileName);
+    std::fstream SecretsFile(FuncSecretsFileName, std::ios::ate | std::ios::out);
+
+    assert(SecretsFile.is_open() &&
+	   "Couldn't open secrets csv file for write in HandlesSecretsWrapperPass");
+
+    int ArgIdx = 0;
     for (auto& Arg : F.args()) {
         if (Arg.hasAttribute(Attribute::Secret)) {
-            FunctionHandlesSecrets = true;
-            return false;
+	    SecretsFile << FuncName << ',' << ArgIdx << '\n';
+            this->FunctionHandlesSecrets |= true;
         }
+	++ArgIdx;
     }
-    // StringRef SecretLabel("secret");
-    // for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
-    //     if (auto *CallInsn = dyn_cast<CallBase>(&*I)) {
-    //         if (auto *CalledFunction = CallInsn->getCalledFunction()) {
-    //             if (CalledFunction->isIntrinsic() && CalledFunction->getName() == "llvm.var.annotation") {
-    //                 FunctionHandlesSecrets = true;
-    //                 // At this point, means that we've found an annotation attribute, the rest of this nesting
-    //                 // checks that the annotation attribute is a "secret" annotation attribute courtesy of
-    //                 // https://stackoverflow.com/questions/46206777/identify-annotated-variable-in-an-llvm-pass
-    //                 // The llvm.var.annotation intrinsic has three args: ptr to the variable being annotated,
-    //                 // pointer to the global string annotation, and a pointer to the global filename corresponding
-    //                 // to the llvm ir module 
-    //                 ConstantExpr *ce = cast<ConstantExpr>(CallInsn->getOperand(1));
-    //                 if (ce) {
-    //                     if (ce->getOpcode() == Instruction::GetElementPtr) {
-    //                         if (GlobalVariable *annoteStr =
-    //                             dyn_cast<GlobalVariable>(ce->getOperand(0))) {
-    //                             if (ConstantDataSequential *data =
-    //                                     dyn_cast<ConstantDataSequential>(annoteStr->getInitializer())) {
-    //                                 if (data->isString()) {
-    //                                     StringRef AnnotationLabel = data->getAsString();
-    //                                     if (AnnotationLabel.startswith(SecretLabel)) {
-    //                                         FunctionHandlesSecrets = true;
-    //                                     }
-    //                                 }
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-    // FunctionHandlesSecrets = false;
+    
     return false; // Doesn't change IR
 }
 
 char HandlesSecretsWrapperPass::ID = 0;
-
-
 
 } // end namespace llvm

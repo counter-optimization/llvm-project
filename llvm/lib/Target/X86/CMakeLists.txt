@@ -77,6 +77,8 @@ set(sources
   X86ShuffleDecodeConstantPool.cpp
   X86SilentStoreHardening.cpp
   X86CompSimpHardening.cpp
+  X86MitigationIdx.cpp
+  X86MitigationDeIdx.cpp
   X86SpeculativeLoadHardening.cpp
   X86SpeculativeExecutionSideEffectSuppression.cpp
   X86Subtarget.cpp
