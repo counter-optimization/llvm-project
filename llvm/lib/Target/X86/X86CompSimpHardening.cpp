@@ -2320,30 +2320,33 @@ void X86_64CompSimpMitigationPass::insertSafeShr8riBefore(MachineInstr *MI) {
   auto Op1_64 =
       TRI->getMatchingSuperReg(Op1, X86::sub_8bit, &X86::GR64RegClass);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R13).addReg(Op1_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R10D).addImm(pow(2, 31));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R10D).addImm(2147483648);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R10B).addImm(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
       .addReg(X86::R10)
       .addImm(32 - 5);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R12).addImm(0x0);
   BuildMI(*MBB, *MI, DL, TII->get(X86::CMP32ri8), X86::R10D).addImm(0x0);
   BuildMI(*MBB, *MI, DL, TII->get(X86::SETCCr), X86::R12B).addImm(4);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CMOV64rr), X86::R10)
+      .addReg(X86::R10)
+      .addReg(Op1)
+      .addImm(4);
   BuildMI(*MBB, *MI, DL, TII->get(X86::CMOV64rr), Op1_64)
       .addReg(Op1_64)
       .addReg(X86::R12)
       .addImm(4);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(pow(2, 63));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(9223372036854775808);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R11B)
-      .addReg(Op1)
       .add(MOp2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::AND8ri), Op1)
-      .addReg(Op1)
-      .addImm(pow(2, 5) - 1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), Op1)
-      .addReg(Op1)
-      .addReg(X86::R11);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op1_64).addReg(X86::R13);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), X86::R11)
+      .addReg(X86::R11)
+      .addImm(Op2 & 31);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CMP32ri8), X86::R12D).addImm(0x0);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CMOV64rr), Op1_64)
+      .addReg(Op1_64)
+      .addReg(X86::R10)
+      .addImm(5);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeShr32r1Before(MachineInstr *MI) {
@@ -2911,9 +2914,13 @@ void X86_64CompSimpMitigationPass::insertSafeTest8miBefore(MachineInstr *MI) {
   // TODO is it index 1 or 0?
   MachineOperand MOp1 = MI->getOperand(0);
   MachineOperand MOp2 = MI->getOperand(1);
+  MachineOperand MOp3 = MI->getOperand(2);
+  MachineOperand MOp4 = MI->getOperand(3);
+  MachineOperand MOp5 = MI->getOperand(4);
+  MachineOperand MOp6 = MI->getOperand(5);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R13).add(MOp2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R14).add(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R13).add(MOp6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R14).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5);
 
   auto Op1 = X86::R14B;
   auto Op2 = X86::R13B;
@@ -3051,7 +3058,7 @@ void X86_64CompSimpMitigationPass::insertSafeAnd8Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1.getReg());
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(Op2.getReg());
-  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1.getReg()).addReg(X86::R10B);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2.getReg()).addReg(X86::R11B);
 }
@@ -3103,7 +3110,7 @@ void X86_64CompSimpMitigationPass::insertSafeXor8rmBefore(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1).addReg(X86::R10B);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2).addReg(X86::R11B);
 }
@@ -3145,7 +3152,7 @@ void X86_64CompSimpMitigationPass::insertSafeXor8Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1).addReg(X86::R10B);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2).addReg(X86::R11B);
 }
@@ -3184,7 +3191,7 @@ void X86_64CompSimpMitigationPass::insertSafeOr8Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1.getReg());
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(Op2.getReg());
-  BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1.getReg()).addReg(X86::R10B);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2.getReg()).addReg(X86::R11B);
 }
@@ -3225,7 +3232,7 @@ void X86_64CompSimpMitigationPass::insertSafeOr16Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
       .addReg(Op2.getReg());
-  BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1.getReg())
       .addReg(X86::R10W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2.getReg())
@@ -3268,7 +3275,7 @@ void X86_64CompSimpMitigationPass::insertSafeAnd16Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
       .addReg(Op2.getReg());
-  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1.getReg())
       .addReg(X86::R10W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2.getReg())
@@ -3311,7 +3318,7 @@ void X86_64CompSimpMitigationPass::insertSafeXor16Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
       .addReg(Op2.getReg());
-  BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1.getReg())
       .addReg(X86::R10W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2.getReg())
@@ -3344,14 +3351,19 @@ void X86_64CompSimpMitigationPass::insertSafeXor64mrBefore(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
+  MachineOperand MOp0 = MI->getOperand(0);
   MachineOperand MOp1 = MI->getOperand(1);
   MachineOperand MOp2 = MI->getOperand(2);
+  MachineOperand MOp3 = MI->getOperand(3);
+  MachineOperand MOp4 = MI->getOperand(4);
+  MachineOperand MOp6 = MI->getOperand(5);
 
-  assert(MOp2.isReg() && "Op2 is a reg");
+  assert(MOp6.isReg() && "Op2 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp0).add(MOp1).add(MOp2)
+      .add(MOp3).add(MOp4);
 
-  auto Op2 = MOp2.getReg();
+  auto Op2 = MOp6.getReg();
   auto Op1 = X86::R13;
 
   auto Op1_16 = TRI->getSubReg(Op1, 4);
@@ -3370,7 +3382,8 @@ void X86_64CompSimpMitigationPass::insertSafeXor64mrBefore(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1_16).addReg(X86::R10W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2_16).addReg(X86::R11W);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr)).add(MOp1).addReg(X86::R13);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr)).add(MOp0).add(MOp1).add(MOp2).add(MOp3).add(MOp4)
+      .addReg(X86::R13);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeXor64rmBefore(MachineInstr *MI) {
@@ -3646,15 +3659,16 @@ void X86_64CompSimpMitigationPass::insertSafeXor32Before(MachineInstr *MI) {
   assert(MOp1.isReg() && "Op1 is a reg");
   assert(MOp2.isReg() && "Op2 is a reg");
 
+  
   auto Op1 = MOp1.getReg();
   auto Op2 = MOp2.getReg();
 
-  auto Op2_64 =
-      TRI->getMatchingSuperReg(Op2, X86::sub_32bit, &X86::GR64RegClass);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10D).addReg(Op2);
+
+  auto Op2_64 = X86::R10;
   auto Op1_64 =
       TRI->getMatchingSuperReg(Op1, X86::sub_32bit, &X86::GR64RegClass);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op1).addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op2).addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(pow(2, 33));
@@ -3669,7 +3683,6 @@ void X86_64CompSimpMitigationPass::insertSafeXor32Before(MachineInstr *MI) {
       .addReg(Op1_64)
       .addReg(Op2_64);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op1).addReg(Op1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R10);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeOr64ri8Before(MachineInstr *MI) {
@@ -4851,14 +4864,18 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64rmBefore(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+  MachineOperand MOp1 = MI->getOperand(1);
+  MachineOperand MOp2 = MI->getOperand(2);
+  MachineOperand MOp3 = MI->getOperand(3);
+  MachineOperand MOp4 = MI->getOperand(4);
+  MachineOperand MOp5 = MI->getOperand(5);
+  MachineOperand MOp6 = MI->getOperand(6);
 
-  assert(Op1.isReg() && "Op1 is a reg");
+  assert(MOp1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(Op2);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp2).add(MOp3).add(MOp4).add(MOp5).add(MOp6);
 
-  auto Op3 = Op1.getReg();
+  auto Op3 = MOp1.getReg();
   auto Op4 = X86::R13;
 
   auto Op4_8 = TRI->getSubReg(Op4, 1);
@@ -5059,11 +5076,15 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64mi8Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+  MachineOperand MOp1 = MI->getOperand(0);
+  MachineOperand MOp2 = MI->getOperand(1);
+  MachineOperand MOp3 = MI->getOperand(2);
+  MachineOperand MOp4 = MI->getOperand(3);
+  MachineOperand MOp5 = MI->getOperand(4);
+  MachineOperand MOp6 = MI->getOperand(5);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R14).add(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(Op1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R14).add(MOp6);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5);
 
   auto Op3 = X86::R13;
   auto Op4 = X86::R14;
@@ -5153,20 +5174,15 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64mi32Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(1);
-  MachineOperand MOp2 = MI->getOperand(2);
-  MachineOperand MOp3 = MI->getOperand(3);
-  MachineOperand MOp4 = MI->getOperand(4);
-  MachineOperand MOp5 = MI->getOperand(5);
-  MachineOperand MOp6 = MI->getOperand(6);
+  MachineOperand MOp1 = MI->getOperand(0);
+  MachineOperand MOp2 = MI->getOperand(1);
+  MachineOperand MOp3 = MI->getOperand(2);
+  MachineOperand MOp4 = MI->getOperand(3);
+  MachineOperand MOp5 = MI->getOperand(4);
+  MachineOperand MOp6 = MI->getOperand(5);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R14).add(MOp6);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
-      .add(MOp1)
-      .add(MOp2)
-      .add(MOp3)
-      .add(MOp4)
-      .add(MOp5);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5);
 
   auto Op3 = X86::R13;
   auto Op4 = X86::R14;
@@ -5534,12 +5550,12 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64mrBefore(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(1);
-  MachineOperand MOp2 = MI->getOperand(2);
-  MachineOperand MOp3 = MI->getOperand(3);
-  MachineOperand MOp4 = MI->getOperand(4);
-  MachineOperand MOp5 = MI->getOperand(5);
-  MachineOperand MOp6 = MI->getOperand(6);
+  MachineOperand MOp1 = MI->getOperand(0);
+  MachineOperand MOp2 = MI->getOperand(1);
+  MachineOperand MOp3 = MI->getOperand(2);
+  MachineOperand MOp4 = MI->getOperand(3);
+  MachineOperand MOp5 = MI->getOperand(4);
+  MachineOperand MOp6 = MI->getOperand(5);
 
   assert(MOp6.isReg() && "Op6 is a reg");
 
@@ -5645,12 +5661,12 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64mrBefore(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(1);
-  MachineOperand MOp2 = MI->getOperand(2);
-  MachineOperand MOp3 = MI->getOperand(3);
-  MachineOperand MOp4 = MI->getOperand(4);
-  MachineOperand MOp5 = MI->getOperand(5);
-  MachineOperand MOp6 = MI->getOperand(6);
+  MachineOperand MOp1 = MI->getOperand(0);
+  MachineOperand MOp2 = MI->getOperand(1);
+  MachineOperand MOp3 = MI->getOperand(2);
+  MachineOperand MOp4 = MI->getOperand(3);
+  MachineOperand MOp5 = MI->getOperand(4);
+  MachineOperand MOp6 = MI->getOperand(5);
 
   assert(MOp6.isReg() && "Op6 is a reg");
 
@@ -5755,7 +5771,7 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64rmBefore(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
+  MachineOperand Op1 = MI->getOperand(0);
   MachineOperand Op2 = MI->getOperand(2);
   MachineOperand Op3 = MI->getOperand(3);
   MachineOperand Op4 = MI->getOperand(4);
@@ -6468,11 +6484,15 @@ void X86_64CompSimpMitigationPass::insertSafeAdc32mi8Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
+  MachineOperand Op0 = MI->getOperand(0);
   MachineOperand Op1 = MI->getOperand(1);
   MachineOperand Op2 = MI->getOperand(2);
+  MachineOperand Op3 = MI->getOperand(3);
+  MachineOperand Op4 = MI->getOperand(4);
+  MachineOperand Op5 = MI->getOperand(5);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R13).add(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R14).add(Op1);
+  auto I1 = BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R13).add(Op5);
+  auto I2 = BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rm), X86::R14).add(Op0).add(Op1).add(Op2).add(Op3).add(Op4);
 
   auto R1 = X86::R14D;
   auto R2 = X86::R13D;
@@ -6649,7 +6669,8 @@ void X86_64CompSimpMitigationPass::insertSafeAdd16Before(MachineInstr *MI) {
   auto I =
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10W).addReg(Op2_64);
   I->dump();
-  assert(false && "TODO: debug this to find how to convert cx into ecx");
+  /* assert(false && "TODO: debug this to find how to convert cx into ecx"); */
+  llvm::errs() << "Unable to convert cx into ecx\n";
 }
 
 void X86_64CompSimpMitigationPass::insertSafeSub16Before(MachineInstr *MI) {
@@ -6689,7 +6710,8 @@ void X86_64CompSimpMitigationPass::insertSafeSub16Before(MachineInstr *MI) {
   auto I =
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10W).addReg(Op2_64);
   I->dump();
-  assert(false && "TODO: debug this to find how to convert cx into ecx");
+  /* assert(false && "TODO: debug this to find how to convert cx into ecx"); */
+  llvm::errs() << "Not implemented yet\n";
 }
 
 void X86_64CompSimpMitigationPass::insertSafeCmp8rrBefore(MachineInstr *MI) {
@@ -7081,645 +7103,636 @@ void X86_64CompSimpMitigationPass::subFallBack(MachineInstr *MI) {
 
 void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
   switch (MI->getOpcode()) {
-  // case X86::ADD64ri8: {
-  //    insertSafeAdd64ri8Before(MI);
-  //    updateStats(MI, 1); MI->eraseFromParent();
-  //    break;
-  // }
-  // case X86::ADD64ri32: {
-  //   insertSafeAdd64ri32Before(MI);
-  //   updateStats(MI, 2);
-  //   // callUpdateStats(MI, 5) ;
-  //   MI->eraseFromParent();
-  //   break;
-  // }
-  case X86::ADD64mi32: {
-    insertSafeAdd64mi32Before(MI);
-    updateStats(MI, 3);
-    MI->eraseFromParent();
+ case X86::ADD64ri8: {
+    insertSafeAdd64ri8Before(MI);
+    updateStats(MI, 1); MI->eraseFromParent();
     break;
-  }
-  case X86::ADD64mi8: {
-    insertSafeAdd64mi8Before(MI);
-    updateStats(MI, 4);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADD64mr: {
-    insertSafeAdd64mrBefore(MI);
-    updateStats(MI, 5);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADD64rm: {
-    insertSafeAdd64rmBefore(MI);
-    updateStats(MI, 6);
-    MI->eraseFromParent();
-    break;
-  }
-  // case X86::ADD64rr: {
-  //   insertSafeAdd64Before(MI);
-  //   updateStats(MI, 7); MI->eraseFromParent();
-  //   break;
-  // }
-  // case X86::ADC64rr: {
-  //   insertSafeAdc64Before(MI);
-  //   updateStats(MI, 8); MI->eraseFromParent();
-  //   break;
-  // }
-  case X86::ADC64rm: {
-    insertSafeAdc64rmBefore(MI);
-    updateStats(MI, 9);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADC64mr: {
-    insertSafeAdc64mrBefore(MI);
-    updateStats(MI, 10);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADC64ri8: {
-    insertSafeAdc64ri8Before(MI);
-    updateStats(MI, 11);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADD32rr: {
-    insertSafeAdd32Before(MI);
-    updateStats(MI, 12);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADD32rm: {
-    insertSafeAdd32rmBefore(MI);
-    updateStats(MI, 13);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADD32ri8: {
-    insertSafeAdd32ri8Before(MI);
-    updateStats(MI, 14);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADD32i32: {
-    MI->dump();
-    assert(false && "comp simp todo");
-    break;
-  }
-  case X86::ADC32mi8: {
-    insertSafeAdc32mi8Before(MI);
-    updateStats(MI, 16);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::ADD8rm: {
-    MI->dump();
-    assert(false && "comp simp todo");
-    break;
-  }
-  case X86::AND64rr: {
-    insertSafeAnd64Before(MI);
-    updateStats(MI, 18);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::AND64i32: {
-    assert(false && "comp simp todo");
-    break;
-  }
-  case X86::AND64ri32: {
-    insertSafeAnd64ri32Before(MI);
-    updateStats(MI, 20);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::AND64ri8: {
-    insertSafeAnd64ri8Before(MI);
-    updateStats(MI, 21);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::AND32rr: {
-    insertSafeAnd32Before(MI);
-    updateStats(MI, 22);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::AND32ri8: {
-    insertSafeAnd32ri8Before(MI);
-    updateStats(MI, 23);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::AND32ri: {
-    insertSafeAnd32riBefore(MI);
-    updateStats(MI, 24);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::AND32i32: {
-    assert(false && "comp simp todo");
-    insertSafeAnd32riBefore(MI);
-    updateStats(MI, 25);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::OR64rr: {
-    insertSafeOr64Before(MI);
-    updateStats(MI, 26);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::OR64rm: {
-    insertSafeOr64rmBefore(MI);
-    updateStats(MI, 27);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::OR64ri8: {
-    insertSafeOr64ri8Before(MI);
-    updateStats(MI, 28);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::OR32rr: {
-    insertSafeOr32Before(MI);
-    updateStats(MI, 29);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::OR32ri8: {
-    insertSafeOr32ri8Before(MI);
-    updateStats(MI, 30);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::OR8rm: {
-    assert(false && "comp simp todo");
-    break;
-  }
-  case X86::MUL64m: {
-    assert(false && "comp simp todo");
-    break;
-  }
-  case X86::XOR64rr: {
-    insertSafeXor64Before(MI);
-    updateStats(MI, 34);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::XOR64rm: {
-    insertSafeXor64rmBefore(MI);
-    updateStats(MI, 35);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::XOR64mr: {
-    insertSafeXor64mrBefore(MI);
-    updateStats(MI, 36);
-    MI->eraseFromParent();
-    break;
-  }
-  // case X86::XOR32rr: {
-  //   insertSafeXor32Before(MI);
-  //   updateStats(MI, 37); MI->eraseFromParent();
-  //   break;
-  // }
-  case X86::XOR32rm: {
-    insertSafeXor32rmBefore(MI);
-    updateStats(MI, 38);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::XOR32ri8: {
-    insertSafeXor32ri8Before(MI);
-    updateStats(MI, 39);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::XOR8rr: {
-    insertSafeXor8Before(MI);
-    updateStats(MI, 40);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::XOR8rm: {
-    insertSafeXor8rmBefore(MI);
-    updateStats(MI, 41);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::SUB64rr: {
-    insertSafeSub64Before(MI);
-    updateStats(MI, 42);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::SUB64rm: {
-    insertSafeSub64rmBefore(MI);
-    updateStats(MI, 43);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::SUB32rr: {
-    insertSafeSub32Before(MI);
-    updateStats(MI, 44);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::TEST32rr: {
-    insertSafeTest32Before(MI);
-    updateStats(MI, 45);
-    MI->eraseFromParent();
-    break;
-  }
+ }
+ case X86::ADD64ri32: {
+   insertSafeAdd64ri32Before(MI);
+   updateStats(MI, 2);
+   // callUpdateStats(MI, 5) ;
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */ case X86::ADD64mi32: {
+ /* ~ */   insertSafeAdd64mi32Before(MI);
+ /* ~ */   updateStats(MI, 3);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADD64mi8: {
+ /* ~ */   insertSafeAdd64mi8Before(MI);
+ /* ~ */   updateStats(MI, 4);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADD64mr: {
+ /* ~ */   insertSafeAdd64mrBefore(MI);
+ /* ~ */   updateStats(MI, 5);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADD64rm: {
+ /* ~ */   insertSafeAdd64rmBefore(MI);
+ /* ~ */   updateStats(MI, 6);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADD64rr: {
+ /* ~ */   insertSafeAdd64Before(MI);
+ /* ~ */   updateStats(MI, 7); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADC64rr: {
+ /* ~ */   insertSafeAdc64Before(MI);
+ /* ~ */   updateStats(MI, 8); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADC64rm: {
+ /* ~ */   insertSafeAdc64rmBefore(MI);
+ /* ~ */   updateStats(MI, 9);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ case X86::ADC64mr: {
+   insertSafeAdc64mrBefore(MI);
+   updateStats(MI, 10);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */  case X86::ADC64ri8: {
+ /* ~ */    insertSafeAdc64ri8Before(MI);
+ /* ~ */    updateStats(MI, 11);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ /* ~ */  case X86::ADD32rr: {
+ /* ~ */    insertSafeAdd32Before(MI);
+ /* ~ */    updateStats(MI, 12);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ case X86::ADD32rm: {
+   insertSafeAdd32rmBefore(MI);
+   updateStats(MI, 13);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */  case X86::ADD32ri8: {
+ /* ~ */    insertSafeAdd32ri8Before(MI);
+ /* ~ */    updateStats(MI, 14);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ case X86::ADD32i32: {
+   MI->dump();
+   assert(false && "comp simp todo");
+   break;
+ }
+ /* ~ */ case X86::ADC32mi8: {
+ /* ~ */   insertSafeAdc32mi8Before(MI);
+ /* ~ */   updateStats(MI, 16);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */// case X86::ADD8rm: {
+ /* ~ *///   MI->dump();
+ /* ~ *///   assert(false && "comp simp todo");
+ /* ~ *///   break;
+ /* ~ */// }
+ case X86::AND64rr: {
+   insertSafeAnd64Before(MI);
+   updateStats(MI, 18);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::AND64i32: {
+   assert(false && "comp simp todo");
+   break;
+ }
+ case X86::AND64ri32: {
+   insertSafeAnd64ri32Before(MI);
+   updateStats(MI, 20);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */  case X86::AND64ri8: {
+ /* ~ */    insertSafeAnd64ri8Before(MI);
+ /* ~ */    updateStats(MI, 21);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ case X86::AND32rr: {
+   insertSafeAnd32Before(MI);
+   updateStats(MI, 22);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::AND32ri8: {
+   insertSafeAnd32ri8Before(MI);
+   updateStats(MI, 23);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::AND32ri: {
+   insertSafeAnd32riBefore(MI);
+   updateStats(MI, 24);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::AND32i32: {
+   assert(false && "comp simp todo");
+   insertSafeAnd32riBefore(MI);
+   updateStats(MI, 25);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */ case X86::OR64rr: {
+ /* ~ */   insertSafeOr64Before(MI);
+ /* ~ */   updateStats(MI, 26);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ case X86::OR64rm: {
+   insertSafeOr64rmBefore(MI);
+   updateStats(MI, 27);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::OR64ri8: {
+   insertSafeOr64ri8Before(MI);
+   updateStats(MI, 28);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */  case X86::OR32rr: {
+ /* ~ */    insertSafeOr32Before(MI);
+ /* ~ */    updateStats(MI, 29);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ case X86::OR32ri8: {
+   insertSafeOr32ri8Before(MI);
+   updateStats(MI, 30);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */// case X86::OR8rm: {
+ /* ~ *///   assert(false && "comp simp todo");
+ /* ~ *///   break;
+ /* ~ */// }
+ /* ~ */// case X86::MUL64m: {
+ /* ~ *///   assert(false && "comp simp todo");
+ /* ~ *///   break;
+ /* ~ */// }
+ case X86::XOR64rr: {
+   insertSafeXor64Before(MI);
+   updateStats(MI, 34);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::XOR64rm: {
+   insertSafeXor64rmBefore(MI);
+   updateStats(MI, 35);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::XOR64mr: {
+   insertSafeXor64mrBefore(MI);
+   updateStats(MI, 36);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::XOR32rr: {
+   insertSafeXor32Before(MI);
+   updateStats(MI, 37); MI->eraseFromParent();
+   break;
+ }
+ case X86::XOR32rm: {
+   insertSafeXor32rmBefore(MI);
+   updateStats(MI, 38);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::XOR32ri8: {
+   insertSafeXor32ri8Before(MI);
+   updateStats(MI, 39);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::XOR8rr: {
+   insertSafeXor8Before(MI);
+   updateStats(MI, 40);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */ case X86::XOR8rm: {
+ /* ~ */   insertSafeXor8rmBefore(MI);
+ /* ~ */   updateStats(MI, 41);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */  case X86::SUB64rr: {
+ /* ~ */    insertSafeSub64Before(MI);
+ /* ~ */    updateStats(MI, 42);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ case X86::SUB64rm: {
+   insertSafeSub64rmBefore(MI);
+   updateStats(MI, 43);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */  case X86::SUB32rr: {
+ /* ~ */    insertSafeSub32Before(MI);
+ /* ~ */    updateStats(MI, 44);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ /* ~ */  case X86::TEST32rr: {
+ /* ~ */    insertSafeTest32Before(MI);
+ /* ~ */    updateStats(MI, 45);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
   case X86::AND8rr: {
     insertSafeAnd8Before(MI);
     updateStats(MI, 46);
     MI->eraseFromParent();
     break;
   }
-  // case X86::TEST8ri: {
-  //   insertSafeTest8riBefore(MI);
-  //   updateStats(MI, 47); MI->eraseFromParent();
-  //   break;
-  // }
+ /* ~ */ case X86::TEST8ri: {
+ /* ~ */   insertSafeTest8riBefore(MI);
+ /* ~ */   updateStats(MI, 47); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
   case X86::TEST8i8: {
     insertSafeTest8i8Before(MI);
     updateStats(MI, 48);
     MI->eraseFromParent();
     break;
   }
-  case X86::TEST8mi: {
-    insertSafeTest8miBefore(MI);
-    updateStats(MI, 49);
-    MI->eraseFromParent();
-    break;
-  }
+ /* ~ */  case X86::TEST8mi: {
+ /* ~ */    insertSafeTest8miBefore(MI);
+ /* ~ */    updateStats(MI, 49);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
   case X86::SHL8rCL: {
     insertSafeShl8rClBefore(MI);
     updateStats(MI, 50);
     MI->eraseFromParent();
     break;
   }
-  case X86::SHR8ri: {
-    insertSafeShr8riBefore(MI);
-    updateStats(MI, 51);
-    MI->eraseFromParent();
-    break;
+ /* ~ */ case X86::SHR8ri: {
+ /* ~ */   insertSafeShr8riBefore(MI);
+ /* ~ */   updateStats(MI, 51);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SAR8r1: {
+ /* ~ */   insertSafeSar8r1Before(MI);
+ /* ~ */   updateStats(MI, 52);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHR32rCL: {
+ /* ~ */   insertSafeShr32rClBefore(MI);
+ /* ~ */   updateStats(MI, 53); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHR32ri: {
+ /* ~ */   insertSafeShr32riBefore(MI);
+ /* ~ */   updateStats(MI, 54); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHR32r1: {
+ /* ~ */   insertSafeShr32r1Before(MI);
+ /* ~ */   updateStats(MI, 55);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ case X86::SHL32rCL: {
+   insertSafeShl32rClBefore(MI);
+   updateStats(MI, 56);
+   MI->eraseFromParent();
+   break;
+ }
+ case X86::SHL32ri: {
+   insertSafeShl32riBefore(MI);
+   updateStats(MI, 57); MI->eraseFromParent();
+   break;
+ }
+ case X86::SAR32r1: {
+   insertSafeSar32r1Before(MI);
+   updateStats(MI, 58);
+   MI->eraseFromParent();
+   break;
+ }
+ /* ~ */ case X86::SAR64ri: {
+ /* ~ */   insertSafeSar64riBefore(MI);
+ /* ~ */   updateStats(MI, 59); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHR64ri: {
+ /* ~ */   insertSafeShr64riBefore(MI);
+ /* ~ */   updateStats(MI, 60); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHL64ri: {
+ /* ~ */   insertSafeShl64riBefore(MI);
+ /* ~ */   updateStats(MI, 61); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ case X86::AND16rr: {
+ insertSafeAnd16Before(MI);
+ updateStats(MI, 62); MI->eraseFromParent();
+ break;
+ }
+ /* ~ */ case X86::OR8rr: {
+ /* ~ */ insertSafeOr8Before(MI);
+ /* ~ */ updateStats(MI, 63); MI->eraseFromParent();
+ /* ~ */ break;
+ /* ~ */ }
+ case X86::OR16rr: {
+ insertSafeOr16Before(MI);
+ updateStats(MI, 64); MI->eraseFromParent();
+ break;
+ }
+ case X86::XOR16rr: {
+ insertSafeXor16Before(MI);
+ updateStats(MI, 65); MI->eraseFromParent();
+ break;
+ }
+case X86::SUB16rr: {
+// TODO: not present in libNa to debug
+insertSafeSub16Before(MI);
+updateStats(MI, 67); MI->eraseFromParent();
+break;
+}
+/* ~ */// case X86::SUB32rm:
+/* ~ */// case X86::ADD8rr: {
+/* ~ *///   // TODO: not present in libNa to debug
+/* ~ *///   assert(false && "support sub8");
+/* ~ *///   break;
+/* ~ */// }
+     case X86::ADD16rr: {
+     insertSafeAdd16Before(MI);
+     updateStats(MI, 70); MI->eraseFromParent();
+     break;
+     }
+  /* ~ */ case X86::SHR64rCL: {
+  /* ~ */   insertSafeShr64Before(MI);
+  /* ~ */   updateStats(MI, 72); MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */// case X86::SHR32rCL: {
+  /* ~ *///   insertSafeShr32Before(MI);
+  /* ~ *///   updateStats(MI, 73); MI->eraseFromParent();
+  /* ~ *///   break;
+  /* ~ */// }
+  case X86::SHR16rCL: {
+  assert(false && "support shr16cl");
+  updateStats(MI, 74); MI->eraseFromParent();
   }
-  case X86::SAR8r1: {
-    insertSafeSar8r1Before(MI);
-    updateStats(MI, 52);
-    MI->eraseFromParent();
-    break;
-  }
-  // case X86::SHR32rCL: {
-  //   insertSafeShr32rClBefore(MI);
-  //   updateStats(MI, 53); MI->eraseFromParent();
-  //   break;
-  // }
-  // case X86::SHR32ri: {
-  //   insertSafeShr32riBefore(MI);
-  //   updateStats(MI, 54); MI->eraseFromParent();
-  //   break;
-  // }
-  case X86::SHR32r1: {
-    insertSafeShr32r1Before(MI);
-    updateStats(MI, 55);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::SHL32rCL: {
-    insertSafeShl32rClBefore(MI);
-    updateStats(MI, 56);
-    MI->eraseFromParent();
-    break;
-  }
-  // case X86::SHL32ri: {
-  //   insertSafeShl32riBefore(MI);
-  //   updateStats(MI, 57); MI->eraseFromParent();
-  //   break;
-  // }
-  case X86::SAR32r1: {
-    insertSafeSar32r1Before(MI);
-    updateStats(MI, 58);
-    MI->eraseFromParent();
-    break;
-  }
-    // case X86::SAR64ri: {
-    //   insertSafeSar64riBefore(MI);
-    //   updateStats(MI, 59); MI->eraseFromParent();
-    //   break;
-    // }
-    // case X86::SHR64ri: {
-    //   insertSafeShr64riBefore(MI);
-    //   updateStats(MI, 60); MI->eraseFromParent();
-    //   break;
-    // }
-    // case X86::SHL64ri: {
-    //   insertSafeShl64riBefore(MI);
-    //   updateStats(MI, 61); MI->eraseFromParent();
-    //   break;
-    // }
-
-    /*
-      case X86::AND16rr: {
-    insertSafeAnd16Before(MI);
-    updateStats(MI, 62); MI->eraseFromParent();
-    break;
-    }
-
-    case X86::OR8rr: {
-    insertSafeOr8Before(MI);
-    updateStats(MI, 63); MI->eraseFromParent();
-    break;
-    }
-    case X86::OR16rr: {
-    insertSafeOr16Before(MI);
-    updateStats(MI, 64); MI->eraseFromParent();
-    break;
-    }
-          case X86::XOR16rr: {
-    insertSafeXor16Before(MI);
-    updateStats(MI, 65); MI->eraseFromParent();
-    break;
-    }
-    
-    case X86::SUB16rr: {
-    // TODO: not present in libNa to debug
-    insertSafeSub16Before(MI);
-    updateStats(MI, 67); MI->eraseFromParent();
-    break;
-    }
-    // case X86::SUB32rm:
-        case X86::ADD8rr: {
-    // TODO: not present in libNa to debug
-    assert(false && "support sub8");
-    break;
-    }
-    case X86::ADD16rr: {
-    insertSafeAdd16Before(MI);
-    updateStats(MI, 70); MI->eraseFromParent();
-    break;
-    }
-    // case X86::ADD32rm:
-      // case X86::SHR64rCL: {
-    //   break;
-    //   // TODO: 10 failures
-    //   insertSafeShr64Before(MI);
-    //   updateStats(MI, 72); MI->eraseFromParent();
-    //   break;
-    // }
-    // case X86::SHR32rCL: {
-    //   // TODO: 27 failures
-    //   insertSafeShr32Before(MI);
-    //   updateStats(MI, 73); MI->eraseFromParent();
-    //   break;
-    // }
-    case X86::SHR16rCL: {
-    assert(false && "support shr16cl");
-    updateStats(MI, 74); MI->eraseFromParent();
-    }
-    case X86::SHR8rCL: {
-    assert(false && "support shr8cl");
-    updateStats(MI, 75); MI->eraseFromParent();
-    }
-    */
+  /* ~ */// case X86::SHR8rCL: {
+  /* ~ */// assert(false && "support shr8cl");
+  /* ~ */// updateStats(MI, 75); MI->eraseFromParent();
+  /* ~ */// }
   case X86::MUL32r: {
     insertSafeMul32rBefore(MI);
     updateStats(MI, 76);
     MI->eraseFromParent();
     break;
   }
-  // case X86::CMP64rr: {
-  //   insertSafeCmp64rrBefore(MI);
-  //   updateStats(MI, 77);
-  //   MI->eraseFromParent();
-  //   break;
-  // }
-  // case X86::CMP64rm: {
-  //   insertSafeCmp64rmBefore(MI);
-  //   updateStats(MI, 78);
-  //   MI->eraseFromParent();
-  //   break;
-  // }
-  // case X86::CMP32rr: {
-  //   insertSafeCmp32rrBefore(MI);
-  //   updateStats(MI, 79);
-  //   MI->eraseFromParent();
-  //   break;
-  // }
-  // case X86::CMP32rm: {
-  //   insertSafeCmp32rmBefore(MI);
-  //   updateStats(MI, 80);
-  //   MI->eraseFromParent();
-  //   break;
-  // }
-  // case X86::CMP32mr: {
-  //   insertSafeCmp32mrBefore(MI);
-  //   updateStats(MI, 81);
-  //   MI->eraseFromParent();
-  //   break;
-  // }
-  case X86::SUB8rr: {
-    insertSafeSub8rrBefore(MI);
-    updateStats(MI, 66); 
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::CMP8rr: {
-    insertSafeCmp8rrBefore(MI);
-    updateStats(MI, 82);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::SBB32rr: {
-    insertSafeSbb32Before(MI);
-    updateStats(MI, 83);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::IMUL32rr: {
-    insertSafeIMul32rrBefore(MI);
-    updateStats(MI, 84);
-    MI->eraseFromParent();
-    break;
-  }
+  /* ~ */ case X86::CMP64rr: {
+  /* ~ */   insertSafeCmp64rrBefore(MI);
+  /* ~ */   updateStats(MI, 77);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP64rm: {
+  /* ~ */   insertSafeCmp64rmBefore(MI);
+  /* ~ */   updateStats(MI, 78);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP32rr: {
+  /* ~ */   insertSafeCmp32rrBefore(MI);
+  /* ~ */   updateStats(MI, 79);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP32rm: {
+  /* ~ */   insertSafeCmp32rmBefore(MI);
+  /* ~ */   updateStats(MI, 80);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP32mr: {
+  /* ~ */   insertSafeCmp32mrBefore(MI);
+  /* ~ */   updateStats(MI, 81);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::SUB8rr: {
+  /* ~ */   insertSafeSub8rrBefore(MI);
+  /* ~ */   updateStats(MI, 66);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP8rr: {
+  /* ~ */   insertSafeCmp8rrBefore(MI);
+  /* ~ */   updateStats(MI, 82);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */  case X86::SBB32rr: {
+  /* ~ */    insertSafeSbb32Before(MI);
+  /* ~ */    updateStats(MI, 83);
+  /* ~ */    MI->eraseFromParent();
+  /* ~ */    break;
+  /* ~ */  }
+  /* ~ */ case X86::IMUL32rr: {
+  /* ~ */   insertSafeIMul32rrBefore(MI);
+  /* ~ */   updateStats(MI, 84);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
   case X86::IMUL32rm: {
     insertSafeIMul32rmBefore(MI);
     updateStats(MI, 85);
     MI->eraseFromParent();
     break;
   }
-  case X86::VPXORrr: {
-    insertSafeVPXorrrBefore(MI);
-    updateStats(MI, 86);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPXORrm: {
-    insertSafeVPXorrmBefore(MI);
-    updateStats(MI, 87);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPXORYrr: {
-    insertSafeVPXoryrrBefore(MI);
-    updateStats(MI, 88);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPXORYrm: {
-    insertSafeVPXoryrmBefore(MI);
-    updateStats(MI, 89);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::PXORrr: {
-    insertSafeVPXorrrBefore(MI);
-    updateStats(MI, 90);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::PXORrm: {
-    insertSafeVPXorrmBefore(MI);
-    updateStats(MI, 91);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPORrr: {
-    insertSafeVPOrrrBefore(MI);
-    updateStats(MI, 92);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPORYrr: {
-    insertSafeVPOryrrBefore(MI);
-    updateStats(MI, 93);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::PORrr: {
-    insertSafeVPOrrrBefore(MI);
-    updateStats(MI, 94);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::PORrm: {
-    insertSafeVPOrrmBefore(MI);
-    updateStats(MI, 95);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPADDDrr: {
-    insertSafeVPAddDrrBefore(MI);
-    updateStats(MI, 96);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPADDDrm: {
-    insertSafeVPAddDrmBefore(MI);
-    updateStats(MI, 97);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPADDDYrr: {
-    insertSafeVPAddDYrrBefore(MI);
-    updateStats(MI, 98);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPADDDYrm: {
-    insertSafeVPAddDYrmBefore(MI);
-    updateStats(MI, 99);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPADDQrr: {
-    insertSafeVPAddQrrBefore(MI);
-    updateStats(MI, 100);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPADDQrm: {
-    insertSafeVPAddQrmBefore(MI);
-    updateStats(MI, 101);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPADDQYrr: {
-    insertSafeVPAddQYrrBefore(MI);
-    updateStats(MI, 102);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPADDQYrm: {
-    insertSafeVPAddQYrmBefore(MI);
-    updateStats(MI, 103);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::PADDQrr: {
-    insertSafeVPAddQrrBefore(MI);
-    updateStats(MI, 104);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::PADDQrm: {
-    insertSafeVPAddQrmBefore(MI);
-    updateStats(MI, 105);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPANDrr: {
-    insertSafeVPAndrrBefore(MI);
-    updateStats(MI, 106);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPANDrm: {
-    insertSafeVPAndrmBefore(MI);
-    updateStats(MI, 107);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::PANDrr: {
-    insertSafeVPAndrrBefore(MI);
-    updateStats(MI, 108);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::PANDrm: {
-    insertSafeVPAndrmBefore(MI);
-    updateStats(MI, 109);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPSHUFBrr: {
-    insertSafeVPShufBrrBefore(MI);
-    updateStats(MI, 110);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPSHUFBYrr: {
-    insertSafeVPShufBYrrBefore(MI);
-    updateStats(MI, 111);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPSHUFBYrm: {
-    insertSafeVPShufBYrmBefore(MI);
-    updateStats(MI, 112);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::VPMULUDQrr: {
-    assert(false && "VPMULUDQrr not implemented");
-    break;
-  }
+  //  case X86::VPXORrr: {
+  //    insertSafeVPXorrrBefore(MI);
+  //    updateStats(MI, 86);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPXORrm: {
+  //    insertSafeVPXorrmBefore(MI);
+  //    updateStats(MI, 87);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPXORYrr: {
+  //    insertSafeVPXoryrrBefore(MI);
+  //    updateStats(MI, 88);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPXORYrm: {
+  //    insertSafeVPXoryrmBefore(MI);
+  //    updateStats(MI, 89);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::PXORrr: {
+  //    insertSafeVPXorrrBefore(MI);
+  //    updateStats(MI, 90);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::PXORrm: {
+  //    insertSafeVPXorrmBefore(MI);
+  //    updateStats(MI, 91);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPORrr: {
+  //    insertSafeVPOrrrBefore(MI);
+  //    updateStats(MI, 92);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPORYrr: {
+  //    insertSafeVPOryrrBefore(MI);
+  //    updateStats(MI, 93);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::PORrr: {
+  //    insertSafeVPOrrrBefore(MI);
+  //    updateStats(MI, 94);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::PORrm: {
+  //    insertSafeVPOrrmBefore(MI);
+  //    updateStats(MI, 95);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPADDDrr: {
+  //    insertSafeVPAddDrrBefore(MI);
+  //    updateStats(MI, 96);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPADDDrm: {
+  //    insertSafeVPAddDrmBefore(MI);
+  //    updateStats(MI, 97);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPADDDYrr: {
+  //    insertSafeVPAddDYrrBefore(MI);
+  //    updateStats(MI, 98);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPADDDYrm: {
+  //    insertSafeVPAddDYrmBefore(MI);
+  //    updateStats(MI, 99);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPADDQrr: {
+  //    insertSafeVPAddQrrBefore(MI);
+  //    updateStats(MI, 100);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPADDQrm: {
+  //    insertSafeVPAddQrmBefore(MI);
+  //    updateStats(MI, 101);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPADDQYrr: {
+  //    insertSafeVPAddQYrrBefore(MI);
+  //    updateStats(MI, 102);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPADDQYrm: {
+  //    insertSafeVPAddQYrmBefore(MI);
+  //    updateStats(MI, 103);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::PADDQrr: {
+  //    insertSafeVPAddQrrBefore(MI);
+  //    updateStats(MI, 104);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::PADDQrm: {
+  //    insertSafeVPAddQrmBefore(MI);
+  //    updateStats(MI, 105);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPANDrr: {
+  //    insertSafeVPAndrrBefore(MI);
+  //    updateStats(MI, 106);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPANDrm: {
+  //    insertSafeVPAndrmBefore(MI);
+  //    updateStats(MI, 107);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::PANDrr: {
+  //    insertSafeVPAndrrBefore(MI);
+  //    updateStats(MI, 108);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::PANDrm: {
+  //    insertSafeVPAndrmBefore(MI);
+  //    updateStats(MI, 109);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPSHUFBrr: {
+  //    insertSafeVPShufBrrBefore(MI);
+  //    updateStats(MI, 110);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPSHUFBYrr: {
+  //    insertSafeVPShufBYrrBefore(MI);
+  //    updateStats(MI, 111);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPSHUFBYrm: {
+  //    insertSafeVPShufBYrmBefore(MI);
+  //    updateStats(MI, 112);
+  //    MI->eraseFromParent();
+  //    break;
+  //  }
+  //  case X86::VPMULUDQrr: {
+  //    assert(false && "VPMULUDQrr not implemented");
+  //    break;
+  //  }
 }
 }
 
@@ -8035,9 +8048,9 @@ static void setupTest(MachineFunction &MF) {
         if (Op == "SHL32rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL32rCL), X86::ECX)
               .addReg(X86::ECX);
-        if (Op == "SHR16rCL")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR16rCL), X86::CX)
-              .addReg(X86::CX);
+        /* if (Op == "SHR16rCL") */
+        /*   BuildMI(*MBB, &MI, DL, TII->get(X86::SHR16rCL), X86::CX) */
+        /*       .addReg(X86::CX); */
         if (Op == "SHL16rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL16rCL), X86::CX)
               .addReg(X86::CX);
@@ -8119,19 +8132,19 @@ static void setupTest(MachineFunction &MF) {
               .addReg(X86::CL)
               .addReg(X86::AL);
         if (Op == "SUB8rr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr), X86::CL)
               .addReg(X86::CL)
               .addReg(X86::AL);
         if (Op == "SBB32rr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SBB32rr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::SBB32rr), X86::ECX)
               .addReg(X86::ECX)
               .addReg(X86::EAX);
         if (Op == "IMUL32rr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rr), X86::ECX)
               .addReg(X86::ECX)
               .addReg(X86::EAX);
         if (Op == "IMUL32rm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rm))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rm), X86::ECX)
               .addReg(X86::ECX)
               .addReg(X86::RAX)
               .addImm(1)
@@ -8167,11 +8180,11 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0);
         if (Op == "PXORrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         if (Op == "PXORrm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrm))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RCX)
               .addImm(1)
@@ -8179,21 +8192,19 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0);
         if (Op == "VPORrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORrr))
-              .addReg(X86::XMM0)
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         if (Op == "VPORYrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORYrr))
-              .addReg(X86::YMM0)
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORYrr), X86::YMM0)
               .addReg(X86::YMM0)
               .addReg(X86::YMM1);
         if (Op == "PORrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         if (Op == "PORrm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrm))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RCX)
               .addImm(1)
@@ -8257,11 +8268,11 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0);
         if (Op == "PADDQrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         if (Op == "PADDQrm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrm))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RCX)
               .addImm(1)
