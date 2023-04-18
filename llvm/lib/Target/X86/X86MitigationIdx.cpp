@@ -93,11 +93,12 @@ bool X86_64MitigationIdxPass::runOnMachineFunction(MachineFunction &MF) {
           .addImm(CurIdx);
 
       // conftest hack
-      if (MF.getName() == "main") {
+      if (false && MF.getName() == "main") {
           if (MIDesc.isReturn()) {
-              // BuildMI return 0
-              BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::RAX)
-                  .addImm(0);
+            BuildMI(MBB, MI, DL, TII->get(X86::SBB64ri32), X86::R11)
+                .addReg(X86::R11)
+                .addImm(0x9999999999);
+            BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::RAX).addImm(0);
           }
       }
     }
