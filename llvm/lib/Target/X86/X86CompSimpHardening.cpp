@@ -7755,7 +7755,7 @@ static void setupTest(MachineFunction &MF) {
         auto *TRI = STI.getRegisterInfo();
         auto &MRI = MF->getRegInfo();
 
-        auto Op = MF->getName().split('-').second.split('-').second;
+        auto Op = MF->getName().split('-').second.rsplit('-').first;
         llvm::errs() << "Op setupTest \t" << Op << "\n";
         if (Op == "ADD64ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RCX)
@@ -8353,11 +8353,18 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
   llvm::errs() << "Running on MachineFunction: " << MF.getName() << "\n";
   if (MF.getName().startswith("x86compsimptest")) {
     setupTest(MF);
+    if (!MF.getName().endswith("-original")) {
+      std::vector<MachineInstr *> MIs;
+      for (auto &MBB : MF) {
+        for (auto &MI : MBB) {
+            MIs.push_back(&MI);
+        }
+      }
+      for (auto &MI : MIs) {
+          doX86CompSimpHardening(MI);
+      }
+    }
     return true;
-  }
-
-  if (MF.getName().endswith("-original")) {
-    return false;
   }
 
   /* static class member: don't reparse the CSV file on each MachineFunction
