@@ -43,6 +43,10 @@ static cl::opt<bool>
 EnableBasePointer("x86-use-base-pointer", cl::Hidden, cl::init(true),
           cl::desc("Enable use of a base pointer for complex stack frames"));
 
+static cl::opt<bool>
+NoReg("x86-do-not-reserve-reg", cl::Hidden, cl::init(false),
+          cl::desc("Do not reserve scratch register for mitigations"));
+
 X86RegisterInfo::X86RegisterInfo(const Triple &TT)
     : X86GenRegisterInfo((TT.isArch64Bit() ? X86::RIP : X86::EIP),
                          X86_MC::getDwarfRegFlavour(TT, false),
@@ -616,10 +620,9 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
                                  {X86::SIL, X86::DIL, X86::BPL, X86::SPL,
                                   X86::SIH, X86::DIH, X86::BPH, X86::SPH}));
 
+  if (NoReg)
+    return Reserved;
   // Reserve registers for computation simplification
-  // Only required during fallback
-  // Reserved.set(X86::R9);
-  // Reserved.set(X86::R10);
 
   Reserved.set(X86::R11);
   Reserved.set(X86::R11B);

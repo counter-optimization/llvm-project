@@ -627,11 +627,17 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         addOffset(BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11)
                       .addReg(BaseRegMO.getReg()),
                   OffsetMO);
+    
     // Insert insn to zero out the low 32 bits of r11d
-    // TODO: Use EFLAGS hack from MOV8
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(X86::RAX);
+    BuildMI(MBB, MI, DL, TII->get(X86::LAHF));
+
     BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), Register(X86::R11D))
         .addReg(Register(X86::R11D))
         .addImm(0);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::SAHF));
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R10);
 
     // Insert insn to move the secret data into the low 8bits of R11
     if (DestRegMO.isImm()) {

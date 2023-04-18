@@ -293,7 +293,12 @@ private:
       // Parse insn idx
       const std::string &InsnIdxStr = Cols.at(InsnIdxColIdx);
       llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
-      this->InsnIdx = std::stoi(InsnIdxStr);
+      if (!InsnIdxStr.empty()) {
+        this->InsnIdx = std::stoi(InsnIdxStr);
+      } else {
+        llvm::errs() << "Unsupported CSV line: " << Line << "\n";
+        this->InsnIdx = -1;
+      }
 
       // parse fn name
       this->SubName = Cols.at(SubNameColIdx);
@@ -3232,7 +3237,7 @@ void X86_64CompSimpMitigationPass::insertSafeOr16Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
       .addReg(Op2.getReg());
-  BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1.getReg())
       .addReg(X86::R10W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2.getReg())
@@ -3275,7 +3280,7 @@ void X86_64CompSimpMitigationPass::insertSafeAnd16Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
       .addReg(Op2.getReg());
-  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1.getReg())
       .addReg(X86::R10W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2.getReg())
@@ -6669,7 +6674,8 @@ void X86_64CompSimpMitigationPass::insertSafeAdd16Before(MachineInstr *MI) {
   auto I =
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10W).addReg(Op2_64);
   I->dump();
-  assert(false && "TODO: debug this to find how to convert cx into ecx");
+  /* assert(false && "TODO: debug this to find how to convert cx into ecx"); */
+  llvm::errs() << "Unable to convert cx into ecx\n";
 }
 
 void X86_64CompSimpMitigationPass::insertSafeSub16Before(MachineInstr *MI) {
@@ -6709,7 +6715,8 @@ void X86_64CompSimpMitigationPass::insertSafeSub16Before(MachineInstr *MI) {
   auto I =
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10W).addReg(Op2_64);
   I->dump();
-  assert(false && "TODO: debug this to find how to convert cx into ecx");
+  /* assert(false && "TODO: debug this to find how to convert cx into ecx"); */
+  llvm::errs() << "Not implemented yet\n";
 }
 
 void X86_64CompSimpMitigationPass::insertSafeCmp8rrBefore(MachineInstr *MI) {
@@ -7113,92 +7120,92 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
    MI->eraseFromParent();
    break;
  }
- /// case X86::ADD64mi32: {
- ///   insertSafeAdd64mi32Before(MI);
- ///   updateStats(MI, 3);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::ADD64mi8: {
- ///   insertSafeAdd64mi8Before(MI);
- ///   updateStats(MI, 4);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::ADD64mr: {
- ///   insertSafeAdd64mrBefore(MI);
- ///   updateStats(MI, 5);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::ADD64rm: {
- ///   insertSafeAdd64rmBefore(MI);
- ///   updateStats(MI, 6);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::ADD64rr: {
- ///   insertSafeAdd64Before(MI);
- ///   updateStats(MI, 7); MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::ADC64rr: {
- ///   insertSafeAdc64Before(MI);
- ///   updateStats(MI, 8); MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::ADC64rm: {
- ///   insertSafeAdc64rmBefore(MI);
- ///   updateStats(MI, 9);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
+ /* ~ */ case X86::ADD64mi32: {
+ /* ~ */   insertSafeAdd64mi32Before(MI);
+ /* ~ */   updateStats(MI, 3);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADD64mi8: {
+ /* ~ */   insertSafeAdd64mi8Before(MI);
+ /* ~ */   updateStats(MI, 4);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADD64mr: {
+ /* ~ */   insertSafeAdd64mrBefore(MI);
+ /* ~ */   updateStats(MI, 5);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADD64rm: {
+ /* ~ */   insertSafeAdd64rmBefore(MI);
+ /* ~ */   updateStats(MI, 6);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADD64rr: {
+ /* ~ */   insertSafeAdd64Before(MI);
+ /* ~ */   updateStats(MI, 7); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADC64rr: {
+ /* ~ */   insertSafeAdc64Before(MI);
+ /* ~ */   updateStats(MI, 8); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::ADC64rm: {
+ /* ~ */   insertSafeAdc64rmBefore(MI);
+ /* ~ */   updateStats(MI, 9);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
  case X86::ADC64mr: {
    insertSafeAdc64mrBefore(MI);
    updateStats(MI, 10);
    MI->eraseFromParent();
    break;
  }
- ///  case X86::ADC64ri8: {
- ///    insertSafeAdc64ri8Before(MI);
- ///    updateStats(MI, 11);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
- ///  case X86::ADD32rr: {
- ///    insertSafeAdd32Before(MI);
- ///    updateStats(MI, 12);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
+ /* ~ */  case X86::ADC64ri8: {
+ /* ~ */    insertSafeAdc64ri8Before(MI);
+ /* ~ */    updateStats(MI, 11);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ /* ~ */  case X86::ADD32rr: {
+ /* ~ */    insertSafeAdd32Before(MI);
+ /* ~ */    updateStats(MI, 12);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
  case X86::ADD32rm: {
    insertSafeAdd32rmBefore(MI);
    updateStats(MI, 13);
    MI->eraseFromParent();
    break;
  }
- ///  case X86::ADD32ri8: {
- ///    insertSafeAdd32ri8Before(MI);
- ///    updateStats(MI, 14);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
+ /* ~ */  case X86::ADD32ri8: {
+ /* ~ */    insertSafeAdd32ri8Before(MI);
+ /* ~ */    updateStats(MI, 14);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
  case X86::ADD32i32: {
    MI->dump();
    assert(false && "comp simp todo");
    break;
  }
- /// case X86::ADC32mi8: {
- ///   insertSafeAdc32mi8Before(MI);
- ///   updateStats(MI, 16);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
- ///// case X86::ADD8rm: {
- /////   MI->dump();
- /////   assert(false && "comp simp todo");
- /////   break;
- ///// }
+ /* ~ */ case X86::ADC32mi8: {
+ /* ~ */   insertSafeAdc32mi8Before(MI);
+ /* ~ */   updateStats(MI, 16);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */// case X86::ADD8rm: {
+ /* ~ *///   MI->dump();
+ /* ~ *///   assert(false && "comp simp todo");
+ /* ~ *///   break;
+ /* ~ */// }
  case X86::AND64rr: {
    insertSafeAnd64Before(MI);
    updateStats(MI, 18);
@@ -7215,12 +7222,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
    MI->eraseFromParent();
    break;
  }
- ///  case X86::AND64ri8: {
- ///    insertSafeAnd64ri8Before(MI);
- ///    updateStats(MI, 21);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
+ /* ~ */  case X86::AND64ri8: {
+ /* ~ */    insertSafeAnd64ri8Before(MI);
+ /* ~ */    updateStats(MI, 21);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
  case X86::AND32rr: {
    insertSafeAnd32Before(MI);
    updateStats(MI, 22);
@@ -7246,12 +7253,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
    MI->eraseFromParent();
    break;
  }
- /// case X86::OR64rr: {
- ///   insertSafeOr64Before(MI);
- ///   updateStats(MI, 26);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
+ /* ~ */ case X86::OR64rr: {
+ /* ~ */   insertSafeOr64Before(MI);
+ /* ~ */   updateStats(MI, 26);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
  case X86::OR64rm: {
    insertSafeOr64rmBefore(MI);
    updateStats(MI, 27);
@@ -7264,26 +7271,26 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
    MI->eraseFromParent();
    break;
  }
- ///  case X86::OR32rr: {
- ///    insertSafeOr32Before(MI);
- ///    updateStats(MI, 29);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
+ /* ~ */  case X86::OR32rr: {
+ /* ~ */    insertSafeOr32Before(MI);
+ /* ~ */    updateStats(MI, 29);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
  case X86::OR32ri8: {
    insertSafeOr32ri8Before(MI);
    updateStats(MI, 30);
    MI->eraseFromParent();
    break;
  }
- ///// case X86::OR8rm: {
- /////   assert(false && "comp simp todo");
- /////   break;
- ///// }
- ///// case X86::MUL64m: {
- /////   assert(false && "comp simp todo");
- /////   break;
- ///// }
+ /* ~ */// case X86::OR8rm: {
+ /* ~ *///   assert(false && "comp simp todo");
+ /* ~ *///   break;
+ /* ~ */// }
+ /* ~ */// case X86::MUL64m: {
+ /* ~ *///   assert(false && "comp simp todo");
+ /* ~ *///   break;
+ /* ~ */// }
  case X86::XOR64rr: {
    insertSafeXor64Before(MI);
    updateStats(MI, 34);
@@ -7325,93 +7332,93 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
    MI->eraseFromParent();
    break;
  }
- /// case X86::XOR8rm: {
- ///   insertSafeXor8rmBefore(MI);
- ///   updateStats(MI, 41);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
- ///  case X86::SUB64rr: {
- ///    insertSafeSub64Before(MI);
- ///    updateStats(MI, 42);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
+ /* ~ */ case X86::XOR8rm: {
+ /* ~ */   insertSafeXor8rmBefore(MI);
+ /* ~ */   updateStats(MI, 41);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */  case X86::SUB64rr: {
+ /* ~ */    insertSafeSub64Before(MI);
+ /* ~ */    updateStats(MI, 42);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
  case X86::SUB64rm: {
    insertSafeSub64rmBefore(MI);
    updateStats(MI, 43);
    MI->eraseFromParent();
    break;
  }
- ///  case X86::SUB32rr: {
- ///    insertSafeSub32Before(MI);
- ///    updateStats(MI, 44);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
- ///  case X86::TEST32rr: {
- ///    insertSafeTest32Before(MI);
- ///    updateStats(MI, 45);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
+ /* ~ */  case X86::SUB32rr: {
+ /* ~ */    insertSafeSub32Before(MI);
+ /* ~ */    updateStats(MI, 44);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
+ /* ~ */  case X86::TEST32rr: {
+ /* ~ */    insertSafeTest32Before(MI);
+ /* ~ */    updateStats(MI, 45);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
   case X86::AND8rr: {
     insertSafeAnd8Before(MI);
     updateStats(MI, 46);
     MI->eraseFromParent();
     break;
   }
- /// case X86::TEST8ri: {
- ///   insertSafeTest8riBefore(MI);
- ///   updateStats(MI, 47); MI->eraseFromParent();
- ///   break;
- /// }
+ /* ~ */ case X86::TEST8ri: {
+ /* ~ */   insertSafeTest8riBefore(MI);
+ /* ~ */   updateStats(MI, 47); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
   case X86::TEST8i8: {
     insertSafeTest8i8Before(MI);
     updateStats(MI, 48);
     MI->eraseFromParent();
     break;
   }
- ///  case X86::TEST8mi: {
- ///    insertSafeTest8miBefore(MI);
- ///    updateStats(MI, 49);
- ///    MI->eraseFromParent();
- ///    break;
- ///  }
+ /* ~ */  case X86::TEST8mi: {
+ /* ~ */    insertSafeTest8miBefore(MI);
+ /* ~ */    updateStats(MI, 49);
+ /* ~ */    MI->eraseFromParent();
+ /* ~ */    break;
+ /* ~ */  }
   case X86::SHL8rCL: {
     insertSafeShl8rClBefore(MI);
     updateStats(MI, 50);
     MI->eraseFromParent();
     break;
   }
- /// case X86::SHR8ri: {
- ///   insertSafeShr8riBefore(MI);
- ///   updateStats(MI, 51);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::SAR8r1: {
- ///   insertSafeSar8r1Before(MI);
- ///   updateStats(MI, 52);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::SHR32rCL: {
- ///   insertSafeShr32rClBefore(MI);
- ///   updateStats(MI, 53); MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::SHR32ri: {
- ///   insertSafeShr32riBefore(MI);
- ///   updateStats(MI, 54); MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::SHR32r1: {
- ///   insertSafeShr32r1Before(MI);
- ///   updateStats(MI, 55);
- ///   MI->eraseFromParent();
- ///   break;
- /// }
+ /* ~ */ case X86::SHR8ri: {
+ /* ~ */   insertSafeShr8riBefore(MI);
+ /* ~ */   updateStats(MI, 51);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SAR8r1: {
+ /* ~ */   insertSafeSar8r1Before(MI);
+ /* ~ */   updateStats(MI, 52);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHR32rCL: {
+ /* ~ */   insertSafeShr32rClBefore(MI);
+ /* ~ */   updateStats(MI, 53); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHR32ri: {
+ /* ~ */   insertSafeShr32riBefore(MI);
+ /* ~ */   updateStats(MI, 54); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHR32r1: {
+ /* ~ */   insertSafeShr32r1Before(MI);
+ /* ~ */   updateStats(MI, 55);
+ /* ~ */   MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
  case X86::SHL32rCL: {
    insertSafeShl32rClBefore(MI);
    updateStats(MI, 56);
@@ -7429,31 +7436,31 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
    MI->eraseFromParent();
    break;
  }
- /// case X86::SAR64ri: {
- ///   insertSafeSar64riBefore(MI);
- ///   updateStats(MI, 59); MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::SHR64ri: {
- ///   insertSafeShr64riBefore(MI);
- ///   updateStats(MI, 60); MI->eraseFromParent();
- ///   break;
- /// }
- /// case X86::SHL64ri: {
- ///   insertSafeShl64riBefore(MI);
- ///   updateStats(MI, 61); MI->eraseFromParent();
- ///   break;
- /// }
+ /* ~ */ case X86::SAR64ri: {
+ /* ~ */   insertSafeSar64riBefore(MI);
+ /* ~ */   updateStats(MI, 59); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHR64ri: {
+ /* ~ */   insertSafeShr64riBefore(MI);
+ /* ~ */   updateStats(MI, 60); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
+ /* ~ */ case X86::SHL64ri: {
+ /* ~ */   insertSafeShl64riBefore(MI);
+ /* ~ */   updateStats(MI, 61); MI->eraseFromParent();
+ /* ~ */   break;
+ /* ~ */ }
  case X86::AND16rr: {
  insertSafeAnd16Before(MI);
  updateStats(MI, 62); MI->eraseFromParent();
  break;
  }
- /// case X86::OR8rr: {
- /// insertSafeOr8Before(MI);
- /// updateStats(MI, 63); MI->eraseFromParent();
- /// break;
- /// }
+ /* ~ */ case X86::OR8rr: {
+ /* ~ */ insertSafeOr8Before(MI);
+ /* ~ */ updateStats(MI, 63); MI->eraseFromParent();
+ /* ~ */ break;
+ /* ~ */ }
  case X86::OR16rr: {
  insertSafeOr16Before(MI);
  updateStats(MI, 64); MI->eraseFromParent();
@@ -7470,95 +7477,95 @@ insertSafeSub16Before(MI);
 updateStats(MI, 67); MI->eraseFromParent();
 break;
 }
-///// case X86::SUB32rm:
-///// case X86::ADD8rr: {
-/////   // TODO: not present in libNa to debug
-/////   assert(false && "support sub8");
-/////   break;
-///// }
+/* ~ */// case X86::SUB32rm:
+/* ~ */// case X86::ADD8rr: {
+/* ~ *///   // TODO: not present in libNa to debug
+/* ~ *///   assert(false && "support sub8");
+/* ~ *///   break;
+/* ~ */// }
      case X86::ADD16rr: {
      insertSafeAdd16Before(MI);
      updateStats(MI, 70); MI->eraseFromParent();
      break;
      }
-  /// case X86::SHR64rCL: {
-  ///   insertSafeShr64Before(MI);
-  ///   updateStats(MI, 72); MI->eraseFromParent();
-  ///   break;
-  /// }
-  /// case X86::SHR32rCL: {
-  ///   insertSafeShr32Before(MI);
-  ///   updateStats(MI, 73); MI->eraseFromParent();
-  ///   break;
-  /// }
+  /* ~ */ case X86::SHR64rCL: {
+  /* ~ */   insertSafeShr64Before(MI);
+  /* ~ */   updateStats(MI, 72); MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */// case X86::SHR32rCL: {
+  /* ~ *///   insertSafeShr32Before(MI);
+  /* ~ *///   updateStats(MI, 73); MI->eraseFromParent();
+  /* ~ *///   break;
+  /* ~ */// }
   case X86::SHR16rCL: {
   assert(false && "support shr16cl");
   updateStats(MI, 74); MI->eraseFromParent();
   }
-  ///// case X86::SHR8rCL: {
-  ///// assert(false && "support shr8cl");
-  ///// updateStats(MI, 75); MI->eraseFromParent();
-  ///// }
+  /* ~ */// case X86::SHR8rCL: {
+  /* ~ */// assert(false && "support shr8cl");
+  /* ~ */// updateStats(MI, 75); MI->eraseFromParent();
+  /* ~ */// }
   case X86::MUL32r: {
     insertSafeMul32rBefore(MI);
     updateStats(MI, 76);
     MI->eraseFromParent();
     break;
   }
-  /// case X86::CMP64rr: {
-  ///   insertSafeCmp64rrBefore(MI);
-  ///   updateStats(MI, 77);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
-  /// case X86::CMP64rm: {
-  ///   insertSafeCmp64rmBefore(MI);
-  ///   updateStats(MI, 78);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
-  /// case X86::CMP32rr: {
-  ///   insertSafeCmp32rrBefore(MI);
-  ///   updateStats(MI, 79);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
-  /// case X86::CMP32rm: {
-  ///   insertSafeCmp32rmBefore(MI);
-  ///   updateStats(MI, 80);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
-  /// case X86::CMP32mr: {
-  ///   insertSafeCmp32mrBefore(MI);
-  ///   updateStats(MI, 81);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
-  /// case X86::SUB8rr: {
-  ///   insertSafeSub8rrBefore(MI);
-  ///   updateStats(MI, 66);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
-  /// case X86::CMP8rr: {
-  ///   insertSafeCmp8rrBefore(MI);
-  ///   updateStats(MI, 82);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
-  ///  case X86::SBB32rr: {
-  ///    insertSafeSbb32Before(MI);
-  ///    updateStats(MI, 83);
-  ///    MI->eraseFromParent();
-  ///    break;
-  ///  }
-  /// case X86::IMUL32rr: {
-  ///   insertSafeIMul32rrBefore(MI);
-  ///   updateStats(MI, 84);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
+  /* ~ */ case X86::CMP64rr: {
+  /* ~ */   insertSafeCmp64rrBefore(MI);
+  /* ~ */   updateStats(MI, 77);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP64rm: {
+  /* ~ */   insertSafeCmp64rmBefore(MI);
+  /* ~ */   updateStats(MI, 78);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP32rr: {
+  /* ~ */   insertSafeCmp32rrBefore(MI);
+  /* ~ */   updateStats(MI, 79);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP32rm: {
+  /* ~ */   insertSafeCmp32rmBefore(MI);
+  /* ~ */   updateStats(MI, 80);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP32mr: {
+  /* ~ */   insertSafeCmp32mrBefore(MI);
+  /* ~ */   updateStats(MI, 81);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::SUB8rr: {
+  /* ~ */   insertSafeSub8rrBefore(MI);
+  /* ~ */   updateStats(MI, 66);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */ case X86::CMP8rr: {
+  /* ~ */   insertSafeCmp8rrBefore(MI);
+  /* ~ */   updateStats(MI, 82);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
+  /* ~ */  case X86::SBB32rr: {
+  /* ~ */    insertSafeSbb32Before(MI);
+  /* ~ */    updateStats(MI, 83);
+  /* ~ */    MI->eraseFromParent();
+  /* ~ */    break;
+  /* ~ */  }
+  /* ~ */ case X86::IMUL32rr: {
+  /* ~ */   insertSafeIMul32rrBefore(MI);
+  /* ~ */   updateStats(MI, 84);
+  /* ~ */   MI->eraseFromParent();
+  /* ~ */   break;
+  /* ~ */ }
   case X86::IMUL32rm: {
     insertSafeIMul32rmBefore(MI);
     updateStats(MI, 85);
@@ -7735,8 +7742,10 @@ break;
 }
 
 static void setupTest(MachineFunction &MF) {
+  llvm::errs() << "setupTest \t" << MF.getName() << "\n";
   for (auto &MBB : MF) {
     for (auto &MI : MBB) {
+      llvm::errs() << "MI setupTest \t" << MI << "\n";
       if (MI.getOpcode() == X86::RET64) {
         MachineBasicBlock *MBB = MI.getParent();
         MachineFunction *MF = MBB->getParent();
@@ -7746,7 +7755,8 @@ static void setupTest(MachineFunction &MF) {
         auto *TRI = STI.getRegisterInfo();
         auto &MRI = MF->getRegInfo();
 
-        auto Op = MF->getName().split('-').second.split('-').first;
+        auto Op = MF->getName().split('-').second.rsplit('-').first;
+        llvm::errs() << "Op setupTest \t" << Op << "\n";
         if (Op == "ADD64ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RCX)
               .addReg(X86::RCX)
@@ -8046,9 +8056,9 @@ static void setupTest(MachineFunction &MF) {
         if (Op == "SHL32rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL32rCL), X86::ECX)
               .addReg(X86::ECX);
-        if (Op == "SHR16rCL")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR16rCL), X86::CX)
-              .addReg(X86::CX);
+        /* if (Op == "SHR16rCL") */
+        /*   BuildMI(*MBB, &MI, DL, TII->get(X86::SHR16rCL), X86::CX) */
+        /*       .addReg(X86::CX); */
         if (Op == "SHL16rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL16rCL), X86::CX)
               .addReg(X86::CX);
@@ -8130,19 +8140,19 @@ static void setupTest(MachineFunction &MF) {
               .addReg(X86::CL)
               .addReg(X86::AL);
         if (Op == "SUB8rr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr), X86::CL)
               .addReg(X86::CL)
               .addReg(X86::AL);
         if (Op == "SBB32rr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SBB32rr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::SBB32rr), X86::ECX)
               .addReg(X86::ECX)
               .addReg(X86::EAX);
         if (Op == "IMUL32rr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rr), X86::ECX)
               .addReg(X86::ECX)
               .addReg(X86::EAX);
         if (Op == "IMUL32rm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rm))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rm), X86::ECX)
               .addReg(X86::ECX)
               .addReg(X86::RAX)
               .addImm(1)
@@ -8178,11 +8188,11 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0);
         if (Op == "PXORrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         if (Op == "PXORrm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrm))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RCX)
               .addImm(1)
@@ -8190,21 +8200,19 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0);
         if (Op == "VPORrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORrr))
-              .addReg(X86::XMM0)
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         if (Op == "VPORYrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORYrr))
-              .addReg(X86::YMM0)
+          BuildMI(*MBB, &MI, DL, TII->get(X86::VPORYrr), X86::YMM0)
               .addReg(X86::YMM0)
               .addReg(X86::YMM1);
         if (Op == "PORrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         if (Op == "PORrm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrm))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PORrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RCX)
               .addImm(1)
@@ -8268,11 +8276,11 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0);
         if (Op == "PADDQrr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrr))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         if (Op == "PADDQrm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrm))
+          BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RCX)
               .addImm(1)
@@ -8342,12 +8350,21 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableCompSimp)
     return false;
 
+  llvm::errs() << "Running on MachineFunction: " << MF.getName() << "\n";
   if (MF.getName().startswith("x86compsimptest")) {
     setupTest(MF);
-  }
-
-  if (MF.getName().endswith("-original")) {
-    return false;
+    if (!MF.getName().endswith("-original")) {
+      std::vector<MachineInstr *> MIs;
+      for (auto &MBB : MF) {
+        for (auto &MI : MBB) {
+            MIs.push_back(&MI);
+        }
+      }
+      for (auto &MI : MIs) {
+          doX86CompSimpHardening(MI);
+      }
+    }
+    return true;
   }
 
   /* static class member: don't reparse the CSV file on each MachineFunction

@@ -71,7 +71,8 @@ bool X86_64MitigationDeIdxPass::runOnMachineFunction(MachineFunction &MF) {
 
   std::vector<MachineInstr *> SBB;
   for (auto &MBB : MF) {
-    for (auto &MI : MBB) {
+    for (auto it = MBB.begin(); it != MBB.end(); ++it) {
+      MachineInstr &MI = *it;
       DebugLoc DL = MI.getDebugLoc();
       const auto &STI = MF.getSubtarget();
       auto *TII = STI.getInstrInfo();
@@ -84,6 +85,10 @@ bool X86_64MitigationDeIdxPass::runOnMachineFunction(MachineFunction &MF) {
       if (MI.getOpcode() == X86::SBB64ri32) {
         if (MI.getOperand(0).getReg() == X86::R11) {
           SBB.push_back(&MI);
+          /* if (MI.getOperand(2).getImm() == 0x999999999) { */
+          /*     it++; */
+          /*     SBB.push_back(&*it); */
+          /* } */
         }
       }
     }
