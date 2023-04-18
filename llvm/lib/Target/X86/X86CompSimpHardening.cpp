@@ -293,7 +293,12 @@ private:
       // Parse insn idx
       const std::string &InsnIdxStr = Cols.at(InsnIdxColIdx);
       llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
-      this->InsnIdx = std::stoi(InsnIdxStr);
+      if (!InsnIdxStr.empty()) {
+        this->InsnIdx = std::stoi(InsnIdxStr);
+      } else {
+        llvm::errs() << "Unsupported CSV line: " << Line << "\n";
+        this->InsnIdx = -1;
+      }
 
       // parse fn name
       this->SubName = Cols.at(SubNameColIdx);
@@ -7737,8 +7742,10 @@ break;
 }
 
 static void setupTest(MachineFunction &MF) {
+  llvm::errs() << "setupTest \t" << MF.getName() << "\n";
   for (auto &MBB : MF) {
     for (auto &MI : MBB) {
+      llvm::errs() << "MI setupTest \t" << MI << "\n";
       if (MI.getOpcode() == X86::RET64) {
         MachineBasicBlock *MBB = MI.getParent();
         MachineFunction *MF = MBB->getParent();
@@ -7748,7 +7755,8 @@ static void setupTest(MachineFunction &MF) {
         auto *TRI = STI.getRegisterInfo();
         auto &MRI = MF->getRegInfo();
 
-        auto Op = MF->getName().split('-').second.split('-').first;
+        auto Op = MF->getName().split('-').second.split('-').second;
+        llvm::errs() << "Op setupTest \t" << Op << "\n";
         if (Op == "ADD64ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RCX)
               .addReg(X86::RCX)
@@ -8342,8 +8350,10 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableCompSimp)
     return false;
 
+  llvm::errs() << "Running on MachineFunction: " << MF.getName() << "\n";
   if (MF.getName().startswith("x86compsimptest")) {
     setupTest(MF);
+    return true;
   }
 
   if (MF.getName().endswith("-original")) {
