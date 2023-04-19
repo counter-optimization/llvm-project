@@ -687,6 +687,54 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     // of the sensitive data, so it's already there.
     break;
   }
+  case X86::PUSH64r: {
+    auto &DestRegMO = MI.getOperand(0);
+
+    // Insert insn to read the contents of destination address into R11
+    MachineInstr *MI2 = addOffset(
+        BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11).addReg(X86::RSP),
+        -8);
+
+    auto SRIByte =
+        TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AL));
+    auto SRIWord =
+        TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AX));
+    auto SRIDouble =
+        TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::EAX));
+    //  MI.print(llvm::errs());
+    //  llvm::errs() << "\n";
+    //  errs() << "SRIByte: " << SRIByte << '\n';
+    //  errs() << "SRIWord: " << SRIWord << '\n';
+    //  errs() << "SRIDouble: " << SRIDouble << '\n';
+    //  errs() << "Subregidx ax of eax: "
+    //         << TRI->getSubRegIndex(MCRegister(X86::EAX),
+    //                                MCRegister(X86::AX))
+    //         << '\n';
+    Register fixedWidthDestReg = DestRegMO.getReg();
+    if (8 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
+      // 1 should be the smallest, least significant subreg
+      fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 1);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
+          .addReg(fixedWidthDestReg);
+    }
+
+    // Insert insn to bitwise not all of R11
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
+        .addReg(Register(X86::R11));
+
+    // PUSH64r R11
+    // MOV R11 to RSP
+    // mov r11, [rsp]
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+        .addReg(X86::RSP) // Base
+        .addImm(1)        // Scale
+        .addReg(0)        // Index
+        .addImm(-8)       // Disp/offset
+        .addReg(0)        // Segment reg
+        .addReg(X86::R11);
+
+    break;
+  }
   case X86::MOVAPSmr: {
     auto &BaseRegMO = MI.getOperand(0);
     auto &ScaleMO = MI.getOperand(1);
@@ -1795,7 +1843,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         .addReg(X86::XMM15);
     break;
   }
-  case X86::INLINEASM:{
+  case X86::INLINEASM: {
     std::string Asm(MI.getOperand(0).getSymbolName());
     std::vector<std::vector<std::string>> Insts;
     std::vector<std::string> Inst;
