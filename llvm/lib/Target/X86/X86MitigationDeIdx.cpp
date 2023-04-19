@@ -64,7 +64,7 @@ bool X86_64MitigationDeIdxPass::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableDeIdx)
     return false;
 
-  llvm::outs() << "Running DeIdx pass on " << MF.getName() << "\n";
+  // llvm::outs() << "Running DeIdx pass on " << MF.getName() << "\n";
   bool doesModifyFunction = false;
 
   std::string SubName = MF.getName().str();

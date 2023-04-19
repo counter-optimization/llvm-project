@@ -64,7 +64,7 @@ bool X86_64MitigationIdxPass::runOnMachineFunction(MachineFunction &MF) {
   if (!EnableIdx)
     return false;
 
-  llvm::errs() << "Running IDX " << MF.getName() << "\n";
+  // llvm::errs() << "Running IDX " << MF.getName() << "\n";
   bool doesModifyFunction = false;
 
   std::string SubName = MF.getName().str();
@@ -87,7 +87,7 @@ bool X86_64MitigationIdxPass::runOnMachineFunction(MachineFunction &MF) {
 
       int CurIdx = InstructionIdx++;
 
-      llvm::errs() << "InstructionIdx: " << CurIdx << " runnning on \n";
+      // llvm::errs() << "InstructionIdx: " << CurIdx << " runnning on \n";
       BuildMI(MBB, MI, DL, TII->get(X86::SBB64ri32), X86::R11)
           .addReg(X86::R11)
           .addImm(CurIdx);

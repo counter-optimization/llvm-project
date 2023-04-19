@@ -207,7 +207,7 @@ private:
 
 	    // Parse insn idx
 	    const std::string& InsnIdxStr = Cols.at(InsnIdxColIdx);
-llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
+// llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
         if (!InsnIdxStr.empty()) {
             this->InsnIdx = std::stoi(InsnIdxStr);
         } else {
@@ -1874,10 +1874,10 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     return doesModifyFunction;
   }
 
-  llvm::errs() << "[SilentStore]\n";
+  // llvm::errs() << "[SilentStore]\n";
 
   std::string SubName = MF.getName().str();
-  errs() << "Hardening func: " << SubName << '\n';
+  // errs() << "Hardening func: " << SubName << '\n';
 
   bool SameSymbolNameAlreadyInstrumented =
       FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
@@ -1892,7 +1892,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
   FunctionsInstrumented.insert(SubName);
 
   for (auto &MBB : MF) {
-    llvm::errs() << "Checking basic block " << MBB << "\n";
+    // llvm::errs() << "Checking basic block " << MBB << "\n";
     for (llvm::MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
          I != E; ++I) {
       llvm::MachineInstr &MI = *I;
@@ -1900,18 +1900,18 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
       const auto &STI = MF.getSubtarget();
       auto *TII = STI.getInstrInfo();
       
-      llvm::errs() << "Checking instruction " << MI << "\n";
+      // llvm::errs() << "Checking instruction " << MI << "\n";
 
       if (MI.getOpcode() == X86::SBB64ri32) {
         int CurIdx = MI.getOperand(2).getImm();
 
-        llvm::errs() << "Found SBB64ri32 instruction at index " << CurIdx << "\n";
+        // llvm::errs() << "Found SBB64ri32 instruction at index " << CurIdx << "\n";
 
         if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
           I++;
           llvm::MachineInstr &NextMI = *I;
 
-          llvm::errs() << "Found instruction " << NextMI << "\n";
+          // llvm::errs() << "Found instruction " << NextMI << "\n";
 
           std::string CurOpcodeName = TII->getName(NextMI.getOpcode()).str();
           // don't count 'meta' insns like debug info, CFI indicators
@@ -1919,9 +1919,9 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
           // we are only on LLVM14, so this is the only descriptor available.
           const MCInstrDesc &MIDesc = NextMI.getDesc();
 
-          errs() << "hardening insn at idx " << CurIdx
-                 << " the MIR insn is: " << CurOpcodeName
-                 << " the full MI is: " << NextMI << '\n';
+          // errs() << "hardening insn at idx " << CurIdx
+          //        << " the MIR insn is: " << CurOpcodeName
+          //        << " the full MI is: " << NextMI << '\n';
 
           auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, CurIdx);
           auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
