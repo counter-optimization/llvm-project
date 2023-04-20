@@ -687,6 +687,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     // of the sensitive data, so it's already there.
     break;
   }
+  case X86::PUSH64i8:
   case X86::PUSH64r: {
     auto &DestRegMO = MI.getOperand(0);
 
@@ -695,27 +696,32 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11).addReg(X86::RSP),
         -8);
 
-    auto SRIByte =
-        TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AL));
-    auto SRIWord =
-        TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AX));
-    auto SRIDouble =
-        TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::EAX));
-    //  MI.print(llvm::errs());
-    //  llvm::errs() << "\n";
-    //  errs() << "SRIByte: " << SRIByte << '\n';
-    //  errs() << "SRIWord: " << SRIWord << '\n';
-    //  errs() << "SRIDouble: " << SRIDouble << '\n';
-    //  errs() << "Subregidx ax of eax: "
-    //         << TRI->getSubRegIndex(MCRegister(X86::EAX),
-    //                                MCRegister(X86::AX))
-    //         << '\n';
-    Register fixedWidthDestReg = DestRegMO.getReg();
-    if (8 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
-      // 1 should be the smallest, least significant subreg
-      fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 1);
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
-          .addReg(fixedWidthDestReg);
+    if (DestRegMO.isImm()) {
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), Register(X86::R11B))
+          .addImm(DestRegMO.getImm());
+    } else {
+      auto SRIByte =
+          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AL));
+      auto SRIWord =
+          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AX));
+      auto SRIDouble =
+          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::EAX));
+      //  MI.print(llvm::errs());
+      //  llvm::errs() << "\n";
+      //  errs() << "SRIByte: " << SRIByte << '\n';
+      //  errs() << "SRIWord: " << SRIWord << '\n';
+      //  errs() << "SRIDouble: " << SRIDouble << '\n';
+      //  errs() << "Subregidx ax of eax: "
+      //         << TRI->getSubRegIndex(MCRegister(X86::EAX),
+      //                                MCRegister(X86::AX))
+      //         << '\n';
+      Register fixedWidthDestReg = DestRegMO.getReg();
+      if (8 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
+        // 1 should be the smallest, least significant subreg
+        fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 1);
+        BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
+            .addReg(fixedWidthDestReg);
+      }
     }
 
     // Insert insn to bitwise not all of R11
