@@ -84,7 +84,7 @@ private:
   inline static std::set<std::string> FunctionsToInstrument;
   inline static std::set<std::string> FunctionsInstrumented;
 
-  void doX86CompSimpHardening(MachineInstr *MI);
+  void doX86CompSimpHardening(MachineInstr *MI, MachineFunction& MF);
   void subFallBack(MachineInstr *MI);
   Register get64BitReg(MachineOperand *MO, const TargetRegisterInfo *TRI);
   void insertSafeOr8Before(MachineInstr *MI);
@@ -7202,8 +7202,11 @@ void X86_64CompSimpMitigationPass::subFallBack(MachineInstr *MI) {
   MI->eraseFromParent();
 }
 
-void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
+void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, MachineFunction& MF) {
   /* llvm::errs() << "mitigating: " << *MI << "\n"; */
+  const auto &STI = MF.getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  
   switch (MI->getOpcode()) {
   case X86::ADD64ri8: {
     insertSafeAdd64ri8Before(MI);
@@ -7676,6 +7679,10 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI) {
     insertSafeIMul32rmBefore(MI);
     updateStats(MI, 85);
     MI->eraseFromParent();
+    break;
+  }
+  default: {
+    errs() << "Unsupported opcode: " << TII->getName(MI->getOpcode()) << '\n';
     break;
   }
     //  case X86::VPXORrr: {
@@ -8467,7 +8474,7 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
         }
       }
       for (auto &MI : MIs) {
-          doX86CompSimpHardening(MI);
+	doX86CompSimpHardening(MI, MF);
       }
     }
     return true;
@@ -8593,7 +8600,7 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
   }
 
   for (MachineInstr *MI : Instructions) {
-    doX86CompSimpHardening(MI);
+    doX86CompSimpHardening(MI, MF);
   }
   return doesModifyFunction;
 }
