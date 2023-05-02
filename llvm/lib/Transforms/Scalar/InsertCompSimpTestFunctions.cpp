@@ -46,7 +46,7 @@ public:
 void InsertCompSimpTestFunctions::createFunction(std::string Inst) {
   llvm::Function *CompSimpTest = llvm::Function::Create(
       FunctionType::get(Type::getVoidTy(F.getContext()), false),
-      GlobalVariable::InternalLinkage, 0, "x86compsimptest-" + Inst, &F);
+      GlobalVariable::AvailableExternallyLinkage, 0, "x86compsimptest_" + Inst, &F);
   BasicBlock *EntryBB =
       BasicBlock::Create(F.getContext(), "entry", CompSimpTest);
   IRBuilder<> Builder(EntryBB);
@@ -80,8 +80,8 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "VPANDrm",   "PADDrr",    "PADDrm",    "VPSHUFBrr", "VPSHUFBYrr",
       "VPSHUFBYrm"};
   for (auto S : Inst) {
-    createFunction(S + "-original");
-    createFunction(S + "-transformed");
+    createFunction(S + "_original");
+    createFunction(S + "_transformed");
   }
 }
 
