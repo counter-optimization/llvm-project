@@ -1,5 +1,6 @@
 
 #include "MCTargetDesc/X86BaseInfo.h"
+#include "MCTargetDesc/X86MCTargetDesc.h"
 #include "X86.h"
 #include "X86FrameLowering.h"
 #include "X86InstrBuilder.h"
@@ -7873,6 +7874,19 @@ static void setupTest(MachineFunction &MF) {
 
         auto Op = MF->getName().split('_').second.rsplit('_').first;
         llvm::errs() << "Op setupTest \t" << Op << "\n";
+
+	/* insert saves of r12-15 */
+	{
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R12);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R13);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R14);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R15);
+	}
+	
         if (Op == "ADD64ri8") {
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RSI)
               .addReg(X86::RSI)
@@ -8452,6 +8466,18 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0);
         }
+
+	/* insert restores of r12-15. pushed r12, r13, r14, 15 */
+	{
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R15);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R14);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R13);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R12);
+	}
         // TODO
         // ADD32i32
         // AND64i32
