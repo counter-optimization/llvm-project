@@ -46,7 +46,7 @@ public:
 void InsertCompSimpTestFunctions::createFunction(std::string Inst) {
   llvm::Function *CompSimpTest = llvm::Function::Create(
       FunctionType::get(Type::getVoidTy(F.getContext()), false),
-      GlobalVariable::AvailableExternallyLinkage, 0, "x86compsimptest_" + Inst, &F);
+      GlobalVariable::ExternalLinkage, 0, "x86compsimptest_" + Inst, &F);
   BasicBlock *EntryBB =
       BasicBlock::Create(F.getContext(), "entry", CompSimpTest);
   IRBuilder<> Builder(EntryBB);
