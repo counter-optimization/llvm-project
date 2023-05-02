@@ -7878,6 +7878,8 @@ static void setupTest(MachineFunction &MF) {
 	/* insert saves of r12-15 */
 	{
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R11);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 	    .addReg(X86::R12);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 	    .addReg(X86::R13);
@@ -8477,6 +8479,144 @@ static void setupTest(MachineFunction &MF) {
 	    .addReg(X86::R13);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 	    .addReg(X86::R12);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R11); 
+	}
+
+	/* write state into first argument per 
+	   implementation-tester.c OutState struct in pandora-eval repo */
+	{
+	  /*
+	    Intel: [base + index*scale + offset] 
+	    ATT: offset(base, index, scale)    
+	   */
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x00) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RAX);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x8) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RBX);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x10) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RCX);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x18) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RDX);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x20) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RSP);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x28) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RBP);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x30) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RSI);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x38) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RDI);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x40) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R8);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x48) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R9);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x50) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R10);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x58) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R11);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x60) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R12);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x68) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R13);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x70) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R14);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x78) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R15);
 	}
         // TODO
         // ADD32i32
