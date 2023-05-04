@@ -7580,13 +7580,13 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-  case X86::SUB16rr: {
-    // TODO: not present in libNa to debug
-    insertSafeSub16Before(MI);
-    updateStats(MI, 67);
-    MI->eraseFromParent();
-    break;
-  }
+  // case X86::SUB16rr: {
+  //   // TODO: not present in libNa to debug
+  //   insertSafeSub16Before(MI);
+  //   updateStats(MI, 67);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
     ///// case X86::SUB32rm:
     ///// case X86::ADD8rr: {
     /////   // TODO: not present in libNa to debug
