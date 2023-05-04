@@ -4805,6 +4805,7 @@ void X86_64CompSimpMitigationPass::insertSafeIMul32rmBefore(MachineInstr *MI) {
       .addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1_8).addReg(X86::R13B);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R13).addReg(Op1_64);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op1).addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::R13W).addImm(1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), X86::R13)
       .addReg(X86::R13)
