@@ -7536,12 +7536,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-  case X86::SAR32r1: {
-    insertSafeSar32r1Before(MI);
-    updateStats(MI, 58);
-    MI->eraseFromParent();
-    break;
-  }
+  // case X86::SAR32r1: {
+  //   insertSafeSar32r1Before(MI);
+  //   updateStats(MI, 58);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
   /// case X86::SAR64ri: {
   ///   insertSafeSar64riBefore(MI);
   ///   updateStats(MI, 59); MI->eraseFromParent();
@@ -7593,12 +7593,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     /////   assert(false && "support sub8");
     /////   break;
     ///// }
-  case X86::ADD16rr: {
-    insertSafeAdd16Before(MI);
-    updateStats(MI, 70);
-    MI->eraseFromParent();
-    break;
-  }
+  // case X86::ADD16rr: {
+  //   insertSafeAdd16Before(MI);
+  //   updateStats(MI, 70);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
   /// case X86::SHR64rCL: {
   ///   insertSafeShr64Before(MI);
   ///   updateStats(MI, 72); MI->eraseFromParent();
@@ -7875,8 +7875,10 @@ static void setupTest(MachineFunction &MF) {
         auto Op = MF->getName().split('_').second.rsplit('_').first;
         llvm::errs() << "Op setupTest \t" << Op << "\n";
 
-	/* insert saves of r12-15 */
+	/* insert saves of r10-15 */
 	{
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R10);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 	    .addReg(X86::R11);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
@@ -8284,14 +8286,6 @@ static void setupTest(MachineFunction &MF) {
           BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rr), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "IMUL32rm")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rm), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
         if (Op == "VPXORrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPXORrr))
               .addReg(X86::XMM0)
@@ -8480,7 +8474,9 @@ static void setupTest(MachineFunction &MF) {
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 	    .addReg(X86::R12);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
-	    .addReg(X86::R11); 
+	    .addReg(X86::R11);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R10); 
 	}
 
 	/* write state into first argument per 
