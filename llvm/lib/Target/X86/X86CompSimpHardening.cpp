@@ -7307,11 +7307,6 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   //   MI->eraseFromParent();
   //   break;
   // }
-  case X86::ADD32i32: {
-    MI->dump();
-    assert(false && "comp simp todo");
-    break;
-  }
   // case X86::ADC32mi8: {
   //   insertSafeAdc32mi8Before(MI);
   //   updateStats(MI, 16);
@@ -7327,10 +7322,6 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     insertSafeAnd64Before(MI);
     updateStats(MI, 18);
     MI->eraseFromParent();
-    break;
-  }
-  case X86::AND64i32: {
-    assert(false && "comp simp todo");
     break;
   }
   case X86::AND64ri32: {
@@ -7622,11 +7613,6 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   /////   updateStats(MI, 73); MI->eraseFromParent();
   /////   break;
   ///// }
-  case X86::SHR16rCL: {
-    assert(false && "support shr16cl");
-    updateStats(MI, 74);
-    MI->eraseFromParent();
-  }
   ///// case X86::SHR8rCL: {
   ///// assert(false && "support shr8cl");
   ///// updateStats(MI, 75); MI->eraseFromParent();
