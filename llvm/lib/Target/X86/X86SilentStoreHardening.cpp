@@ -556,7 +556,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     // of the sensitive data, so it's already there.
     break;
   }
-  case X86::ADD64mr: {
+  case X86::XOR64mr: {
     auto &BaseRegMO = MI.getOperand(0);
     auto &ScaleMO = MI.getOperand(1);
     auto &IndexMO = MI.getOperand(2);
@@ -566,9 +566,97 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
     Remove.push_back(&MI);
 
-    for (auto& MI : Remove) {
-	llvm::errs() << "MIS to remove: " << *MI << '\n';
+    MCRegister Src = SrcRegMO.getReg().asMCReg();
+    MCRegister Src16 = TRI->getSubReg(Src, X86::sub_16bit);
+
+    // load contents of memory into scratch R12
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12)
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO);
+
+    // do CS xor64 transform
+    {
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	    .addImm(1ULL << 16ULL); // 2 ** 16
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+	    .addReg(Src16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Src16)
+	    .addImm(1);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	    .addImm(1ULL << 16ULL);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+	    .addReg(X86::R12W);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), X86::R12W)
+	    .addImm(1);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::XOR64rr), X86::R12)
+	    .addReg(X86::R12)
+	    .addReg(Src);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::XOR64rr), X86::R11)
+	    .addReg(X86::R11)
+	    .addReg(X86::R10);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Src16)
+	    .addReg(X86::R10W);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+	    .addReg(X86::R11W);
     }
+
+    // compute the blinding value
+    {
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	    .addReg(X86::R10);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	    .addReg(BaseRegMO.getReg())
+	    .add(ScaleMO)
+	    .add(IndexMO)
+	    .add(OffsetMO)
+	    .add(SegmentMO);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	    .addReg(X86::R10);
+    }
+
+    //blinding store
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO)
+	.addReg(X86::R10);
+
+    // orig store
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO)
+	.addReg(X86::R12);
+    
+    break;
+  }
+  case X86::ADD64mr: {
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &SrcRegMO = MI.getOperand(5);
+
+    Remove.push_back(&MI);
 
     auto Src = SrcRegMO.getReg().asMCReg();
     auto Src16 = TRI->getSubReg(SrcRegMO.getReg(), X86::sub_16bit);
@@ -586,70 +674,73 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	.add(OffsetMO)
 	.add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
-	.addImm(1ULL << 48ULL); // 2 ** 48
+    // do CS add64rr transform
+    {
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	    .addImm(1ULL << 48ULL); // 2 ** 48
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R10W)
-	.addReg(X86::R12W);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+	    .addReg(X86::R12W);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), X86::R12W)
-	.addImm(1);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), X86::R12W)
+	    .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-	.addImm(1ULL << 48ULL); // 2 ** 48
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	    .addImm(1ULL << 48ULL); // 2 ** 48
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R11W)
-	.addReg(Src16);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+	    .addReg(Src16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Src16)
-	.addImm(1);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Src16)
+	    .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), X86::R10)
-	.addReg(X86::R10)
-	.addImm(16);
+	BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), X86::R10)
+	    .addReg(X86::R10)
+	    .addImm(16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), X86::R11)
-	.addReg(X86::R11)
-	.addImm(16);
+	BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), X86::R11)
+	    .addReg(X86::R11)
+	    .addImm(16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R12)
-	.addReg(X86::R12)
-	.addImm(16);
+	BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R12)
+	    .addReg(X86::R12)
+	    .addImm(16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Src)
-	.addReg(Src)
-	.addImm(16);
+	BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Src)
+	    .addReg(Src)
+	    .addImm(16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ADD32rr), X86::R10D)
-	.addReg(X86::R10D)
-	.addReg(X86::R11D);
+	BuildMI(MBB, MI, DL, TII->get(X86::ADD32rr), X86::R10D)
+	    .addReg(X86::R10D)
+	    .addReg(X86::R11D);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ADC64rr), X86::R12)
-	.addReg(X86::R12)
-	.addReg(Src);
+	BuildMI(MBB, MI, DL, TII->get(X86::ADC64rr), X86::R12)
+	    .addReg(X86::R12)
+	    .addReg(Src);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R11)
-	.addReg(X86::R11)
-	.addImm(16);
+	BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R11)
+	    .addReg(X86::R11)
+	    .addImm(16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Src)
-	.addReg(Src)
-	.addImm(16);
+	BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Src)
+	    .addReg(Src)
+	    .addImm(16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R10)
-	.addReg(X86::R10)
-	.addImm(16);
+	BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R10)
+	    .addReg(X86::R10)
+	    .addImm(16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::RCL64ri), X86::R12)
-	.addReg(X86::R12)
-	.addImm(16);
+	BuildMI(MBB, MI, DL, TII->get(X86::RCL64ri), X86::R12)
+	    .addReg(X86::R12)
+	    .addImm(16);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R12W)
-	.addReg(X86::R10W);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+	    .addReg(X86::R10W);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Src16)
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Src16)
 	.addReg(X86::R11W);
-
+    }
+	
     // Compute the blinding value
     BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
 	.addReg(X86::R12);
@@ -2080,6 +2171,16 @@ static void setupTest(MachineFunction &MF) {
 	  if (Op == "ADD64mr") {
 	    changedOpcode = X86::ADD64mr;
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr), X86::RSI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0)
+	      .addReg(0)
+	      .addReg(X86::RDX);
+	  }
+
+	  else if (Op == "XOR64mr") {
+	    changedOpcode = X86::XOR64mr;
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64mr), X86::RSI)
 	      .addImm(1)
 	      .addReg(0)
 	      .addImm(0)

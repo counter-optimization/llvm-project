@@ -93,7 +93,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "VPSHUFBYrm"};
   
   std::vector<std::string> SSInsts{
-    "ADD64mr"
+    "ADD64mr", "XOR64mr"
   };
   
   for (auto S : CSInsts) {
