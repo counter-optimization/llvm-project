@@ -8,6 +8,7 @@
 #include <map>
 
 #include "MCTargetDesc/X86BaseInfo.h"
+#include "MCTargetDesc/X86MCTargetDesc.h"
 #include "X86FrameLowering.h"
 #include "X86InstrInfo.h"
 #include "X86TargetMachine.h"
@@ -101,7 +102,7 @@ private:
 
     inline static bool CSVFileAlreadyParsed{};
 
-    void doX86SilentStoreHardening(MachineInstr& MI, MachineBasicBlock& MBB, MachineFunction& MF);
+    void doX86SilentStoreHardening(MachineInstr& MI, MachineBasicBlock& MBB, MachineFunction& MF, std::vector<MachineInstr*>& Remove);
 
     struct CheckerAlertCSVLine {
 	std::string SubName{};
@@ -336,7 +337,8 @@ bool X86_64SilentStoreMitigationPass::isRelevantCheckerAlertCSVLine(const Checke
 void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         MachineInstr& MI, 
         MachineBasicBlock& MBB, 
-        MachineFunction& MF) {
+        MachineFunction& MF,
+	std::vector<MachineInstr*>& Remove) {
   DebugLoc DL = MI.getDebugLoc();
   const auto &STI = MF.getSubtarget();
   auto *TII = STI.getInstrInfo();
@@ -560,20 +562,124 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     auto &IndexMO = MI.getOperand(2);
     auto &OffsetMO = MI.getOperand(3);
     auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+    auto &SrcRegMO = MI.getOperand(5);
+
+    Remove.push_back(&MI);
+
+    for (auto& MI : Remove) {
+	llvm::errs() << "MIS to remove: " << *MI << '\n';
+    }
+
+    auto Src = SrcRegMO.getReg().asMCReg();
+    auto Src16 = TRI->getSubReg(SrcRegMO.getReg(), X86::sub_16bit);
+    auto Src8 = TRI->getSubReg(SrcRegMO.getReg(), X86::sub_8bit);
 
     /* 1. need to load contents of memory into a scratch register 
        2. need to do ADD64 mitigation
        3. need to blinding store
        4. need to do the store of ADD64 result
-     */
-    // BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12)
-    //   .add(ScaleMO)
-    //   .add(IndexMO)
-    //   .add(OffsetMO)
-    //   .add(SegmentMO)
-    //   .add(DestRegMO);
+    */
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12)
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	.addImm(1ULL << 48ULL); // 2 ** 48
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+	.addReg(X86::R12W);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), X86::R12W)
+	.addImm(1);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	.addImm(1ULL << 48ULL); // 2 ** 48
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+	.addReg(Src16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Src16)
+	.addImm(1);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), X86::R10)
+	.addReg(X86::R10)
+	.addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), X86::R11)
+	.addReg(X86::R11)
+	.addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R12)
+	.addReg(X86::R12)
+	.addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Src)
+	.addReg(Src)
+	.addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ADD32rr), X86::R10D)
+	.addReg(X86::R10D)
+	.addReg(X86::R11D);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ADC64rr), X86::R12)
+	.addReg(X86::R12)
+	.addReg(Src);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R11)
+	.addReg(X86::R11)
+	.addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Src)
+	.addReg(Src)
+	.addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R10)
+	.addReg(X86::R10)
+	.addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::RCL64ri), X86::R12)
+	.addReg(X86::R12)
+	.addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+	.addReg(X86::R10W);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Src16)
+	.addReg(X86::R11W);
+
+    // Compute the blinding value
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	.addReg(X86::R12);
     
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT64r),  X86::R10)
+	.addReg(X86::R10);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO)
+	.addReg(X86::R10);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO)
+	.addReg(X86::R12);
+
     break;
   }
   case X86::MOV32mr:
@@ -1969,14 +2075,17 @@ static void setupTest(MachineFunction &MF) {
 	    .addReg(X86::R15);
 	}
 
-	if (Op == "ADD64mr") {
-	  changedOpcode = X86::ADD64mr;
-	  BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr), X86::RSI)
-	    .addImm(1)
-	    .addReg(0)
-	    .addImm(0)
-	    .addReg(0)
-	    .addReg(X86::RDX);
+	/* Insert the test insn, the original insn */
+	{
+	  if (Op == "ADD64mr") {
+	    changedOpcode = X86::ADD64mr;
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr), X86::RSI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0)
+	      .addReg(0)
+	      .addReg(X86::RDX);
+	  }
 	}
 	
 
@@ -2137,6 +2246,9 @@ static void setupTest(MachineFunction &MF) {
 }
 
 bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) {
+
+    std::vector<MachineInstr*> Remove{};
+    
   if (!EnableSilentStore)
     return false;
 
@@ -2147,11 +2259,19 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
       for (auto &MBB : MF) {
         for (auto &MI : MBB) {
 	  if (MI.getOpcode() == changedOpcode) {
-	    this->doX86SilentStoreHardening(MI, MBB, MF);
+	      this->doX86SilentStoreHardening(MI, MBB, MF, Remove);
 	  }
         }
       }
     }
+
+    llvm::errs() << "Num MIs to remove: " << Remove.size() << '\n';
+    for (auto& MI : Remove) {
+	llvm::errs() << "Erasing MI from parent: " << *MI << '\n';
+	MI->eraseFromParent();
+    }
+    Remove.clear();
+  
     return true;
   }
 
@@ -2242,12 +2362,19 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
             ErrIter->Print();
             // exit(-1);
           }
-          this->doX86SilentStoreHardening(NextMI, MBB, MF);
+          this->doX86SilentStoreHardening(NextMI, MBB, MF, Remove);
           doesModifyFunction = true;
         }
       }
     }
   }
+
+  llvm::errs() << "Num MIs to remove: " << Remove.size() << '\n';
+  for (auto& MI : Remove) {
+      llvm::errs() << "Erasing MI from parent: " << *MI << '\n';
+      MI->eraseFromParent();
+  }
+  
   return doesModifyFunction;
 }
 
