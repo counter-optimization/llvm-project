@@ -554,6 +554,28 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     // of the sensitive data, so it's already there.
     break;
   }
+  case X86::ADD64mr: {
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &DestRegMO = MI.getOperand(5);
+
+    /* 1. need to load contents of memory into a scratch register 
+       2. need to do ADD64 mitigation
+       3. need to blinding store
+       4. need to do the store of ADD64 result
+     */
+    // BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12)
+    //   .add(ScaleMO)
+    //   .add(IndexMO)
+    //   .add(OffsetMO)
+    //   .add(SegmentMO)
+    //   .add(DestRegMO);
+    
+    break;
+  }
   case X86::MOV32mr:
   case X86::MOV32mi: {
     auto &BaseRegMO = MI.getOperand(0);
@@ -1911,9 +1933,227 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   }
 }
 
+static unsigned int changedOpcode = 0;
+
+static void setupTest(MachineFunction &MF) {
+  llvm::errs() << "setupTest \t" << MF.getName() << "\n";
+  for (auto &MBB : MF) {
+    for (auto &MI : MBB) {
+      llvm::errs() << "MI setupTest \t" << MI << "\n";
+      
+      if (MI.getOpcode() == X86::RET64) {
+        MachineBasicBlock *MBB = MI.getParent();
+        MachineFunction *MF = MBB->getParent();
+        DebugLoc DL = MI.getDebugLoc();
+        const auto &STI = MF->getSubtarget();
+        auto *TII = STI.getInstrInfo();
+        auto *TRI = STI.getRegisterInfo();
+        auto &MRI = MF->getRegInfo();
+
+        auto Op = MF->getName().split('_').second.rsplit('_').first;
+        llvm::errs() << "Op setupTest \t" << Op << "\n";
+
+	/* insert saves of r10-15 */
+	{
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R10);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R11);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R12);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R13);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R14);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+	    .addReg(X86::R15);
+	}
+
+	if (Op == "ADD64mr") {
+	  changedOpcode = X86::ADD64mr;
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr), X86::RSI)
+	    .addImm(1)
+	    .addReg(0)
+	    .addImm(0)
+	    .addReg(0)
+	    .addReg(X86::RDX);
+	}
+	
+
+	/* insert restores of r12-15. pushed r12, r13, r14, 15 */
+	{
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R15);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R14);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R13);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R12);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R11);
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+	    .addReg(X86::R10); 
+	}
+
+	/* write state into first argument per 
+	   implementation-tester.c OutState struct in pandora-eval repo */
+	{
+	  /*
+	    Intel: [base + index*scale + offset] 
+	    ATT: offset(base, index, scale)    
+	   */
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x00) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RAX);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x8) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RBX);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x10) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RCX);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x18) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RDX);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x20) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RSP);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x28) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RBP);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x30) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RSI);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x38) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::RDI);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x40) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R8);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x48) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R9);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x50) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R10);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x58) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R11);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x60) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R12);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x68) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R13);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x70) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R14);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	    .addReg(X86::RDI) // base reg
+	    .addImm(1) // scale (RDI * 1)
+	    .addReg(0) // index reg (none)
+	    .addImm(0x78) // offset
+	    .addReg(0) // segment reg (none)
+	    .addReg(X86::R15);
+	}
+      }
+    }
+  }
+}
+
 bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) {
   if (!EnableSilentStore)
     return false;
+
+  if (MF.getName().startswith("x86silentstorestest")) {
+    setupTest(MF);
+    if (MF.getName().contains("_transformed")) {
+      std::vector<MachineInstr *> MIs;
+      for (auto &MBB : MF) {
+        for (auto &MI : MBB) {
+	  if (MI.getOpcode() == changedOpcode) {
+	    this->doX86SilentStoreHardening(MI, MBB, MF);
+	  }
+        }
+      }
+    }
+    return true;
+  }
 
   /* static class member: don't reparse the CSV file on each MachineFunction
      in the compilation unit */

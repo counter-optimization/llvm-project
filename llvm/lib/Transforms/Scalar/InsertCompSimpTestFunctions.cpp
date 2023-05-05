@@ -38,6 +38,7 @@ public:
   InsertCompSimpTestFunctions(Module &F) : F(F) {}
   void readIntoList(std::string Path);
   void createFunction(std::string Inst);
+  void createSilentStoresFunction(std::string Inst);
   bool run();
 };
 
@@ -54,8 +55,19 @@ void InsertCompSimpTestFunctions::createFunction(std::string Inst) {
   Builder.CreateRetVoid();
 }
 
+void InsertCompSimpTestFunctions::createSilentStoresFunction(std::string Inst) {
+  llvm::Function *SilentStoresTest = llvm::Function::Create(
+      FunctionType::get(Type::getVoidTy(F.getContext()), false),
+      GlobalVariable::ExternalLinkage, 0, "x86silentstorestest_" + Inst, &F);
+  BasicBlock *EntryBB =
+    BasicBlock::Create(F.getContext(), "entry", SilentStoresTest);
+  IRBuilder<> Builder(EntryBB);
+  // Builder.CreateRet(ConstantInt::get(Type::getInt64Ty(F.getContext()), 1));
+  Builder.CreateRetVoid();
+}
+
 void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
-  std::vector<std::string> Inst{
+  std::vector<std::string> CSInsts{
       "ADD64ri8",  "ADD64ri32", "ADD64mi32", "ADD64mi8",  "ADD64mr",
       "ADD64rm",   "ADD64rr",   "ADC64rr",   "ADC64rm",   "ADC64mr",
       "ADC64ri8",  "ADD32rr",   "ADD32rm",   "ADD32ri8",  "ADD32i32",
@@ -79,9 +91,19 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "VPADDQYrr", "VPADDQYrm", "PADDQrr",   "PADDQrm",   "VPANDrr",
       "VPANDrm",   "PADDrr",    "PADDrm",    "VPSHUFBrr", "VPSHUFBYrr",
       "VPSHUFBYrm"};
-  for (auto S : Inst) {
+  
+  std::vector<std::string> SSInsts{
+    "ADD64mr"
+  };
+  
+  for (auto S : CSInsts) {
     createFunction(S + "_original");
     createFunction(S + "_transformed");
+  }
+
+  for (auto S : SSInsts) {
+    createSilentStoresFunction(S + "_original");
+    createSilentStoresFunction(S + "_transformed");
   }
 }
 

@@ -8667,7 +8667,7 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
   /* llvm::errs() << "Running on MachineFunction: " << MF.getName() << "\n"; */
   if (MF.getName().startswith("x86compsimptest")) {
     setupTest(MF);
-    if (!MF.getName().endswith("_original")) {
+    if (MF.getName().contains("_transformed")) {
       std::vector<MachineInstr *> MIs;
       for (auto &MBB : MF) {
         for (auto &MI : MBB) {
