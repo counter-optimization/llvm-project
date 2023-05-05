@@ -147,6 +147,7 @@ private:
   void insertSafeAdd64rmBefore(MachineInstr *MI);
   void insertSafeAdd64mrBefore(MachineInstr *MI);
   void insertSafeAdc64mrBefore(MachineInstr *MI);
+  void insertSafeLea64rBefore(MachineInstr *MI);
   void insertSafeAdd64ri8Before(MachineInstr *MI);
   void insertSafeAdc64ri8Before(MachineInstr *MI);
   void insertSafeAdd64ri32Before(MachineInstr *MI);
@@ -5596,12 +5597,14 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64ri8Before(MachineInstr *MI) {
   auto Op4_16 = TRI->getSubReg(Op4, 4);
   auto Op3_16 = TRI->getSubReg(Op3, 4);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(pow(2, 48));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
+    .addImm(1ULL << 48ULL); // 2 ** 48
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W).addReg(Op4_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op4_16).addImm(0xFFFF);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R12).addImm(pow(2, 48));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op4_16).addImm(0xFFFFULL);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R12)
+    .addImm(1ULL << 48ULL); // 2 ** 48
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W).addReg(Op3_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op3_16).addImm(0xFFFF);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op3_16).addImm(0xFFFFULL);
 
   // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12).addReg(X86::RAX);
   // BuildMI(*MBB, *MI, DL, TII->get(X86::LAHF));
@@ -7270,12 +7273,73 @@ void X86_64CompSimpMitigationPass::subFallBack(MachineInstr *MI) {
   MI->eraseFromParent();
 }
 
+void
+X86_64CompSimpMitigationPass::insertSafeLea64rBefore(MachineInstr *MI)
+{
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  MCRegister Dst64 = MI->getOperand(1).getReg().asMCReg();
+  MCRegister Dst8 = TRI->getSubReg(Dst64, X86::sub_8bit);
+
+  MachineOperand& IndexMO = MI->getOperand(2);
+  MachineOperand& FlagsMO = MI->getOperand(3);
+  MachineOperand& SegmentMO = MI->getOperand(4);
+  MachineOperand& ScaleMO = MI->getOperand(5);
+  MachineOperand& OffsetMO = MI->getOperand(6);
+
+  llvm::errs() << "LEA64r: " << *MI << '\n';
+
+  /*
+    LEA64r: 
+    - in intel syntax: lea $DST:64, [base + idx*scale + offset]
+    - in GAS syntax: lea offset(base, idx, scale), $DST:64
+
+    notes:
+    - some references call offset displacement
+    - base and  idx are registers
+    - offset and scale  are immediates  (compile timknown e constants)
+    - scale is one of {1, 2, 4, 8}
+    - i believe that base is mandatory, but the others are optional
+    - offset is either  an 8, 16, or 32 bit value
+    - details on this addressing mode (this data) in Section 3.7.5 intel SDM
+
+    transform implementation:
+
+        if $Idx present and $Scale != 0:
+             $DST:64 =: $Idx:64
+        if $Idx present and $Scale \in  {2, 4, 8}:
+             CS transform for SHL64ri $DST:64, Log2($Scale)
+        
+	if not $Idx present:
+             MOV64rr $DST:64, $0x0
+
+        if $Base present:
+             CS transform for ADD64rr $DST:64, $BASE:64
+
+        if $Offset present and $Offset != 0:
+             CS transform for ADD64ri $DST:64, $Offset
+   */
+  
+}
+
 void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, MachineFunction& MF) {
   /* llvm::errs() << "mitigating: " << *MI << "\n"; */
   const auto &STI = MF.getSubtarget();
   auto *TII = STI.getInstrInfo();
   
   switch (MI->getOpcode()) {
+  case X86::LEA64r: {
+    insertSafeLea64rBefore(MI);
+    llvm::errs() << "TODO: ADD CS STATS COLLECTOR FOR LEA64r\n";
+    MI->eraseFromParent();
+    break;
+  }
   case X86::ADD64ri8: {
     insertSafeAdd64ri8Before(MI);
     updateStats(MI, 1);
@@ -7941,7 +8005,15 @@ static void setupTest(MachineFunction &MF) {
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 	    .addReg(X86::R15);
 	}
-	
+
+	if (Op == "LEA64r") {
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::LEA64r), X86::RSI)
+	    .addReg(X86::RDX) // base
+	    .addImm(2) // scale
+	    .addReg(X86::RCX) //index
+	    .addImm(73) //displacement
+	    .addReg(0); //no segment reg
+	}
         if (Op == "ADD64ri8") {
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RSI)
               .addReg(X86::RSI)
@@ -8535,7 +8607,7 @@ static void setupTest(MachineFunction &MF) {
 	{
 	  /*
 	    Intel: [base + index*scale + offset] 
-	    ATT: offset(base, index, scale)    
+	    ATT: offset(base, index, scale)        
 	   */
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
 	    .addReg(X86::RDI) // base reg
