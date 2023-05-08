@@ -145,6 +145,7 @@ private:
   void insertSafeAdd32ri8Before(MachineInstr *MI);
   void insertSafeAdc32mi8Before(MachineInstr *MI);
   void insertSafeAdd32ri32Before(MachineInstr *MI);
+    void insertSafeAdd32riBefore(MachineInstr *MI);
   void insertSafeAdd32OldBefore(MachineInstr *MI);
   void insertSafeAdd64Before(MachineInstr *MI);
   void insertSafeAdd64rmBefore(MachineInstr *MI);
@@ -6552,6 +6553,45 @@ void X86_64CompSimpMitigationPass::insertSafeAdd32ri32Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R11);
 }
 
+void
+X86_64CompSimpMitigationPass::insertSafeAdd32riBefore(MachineInstr *MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+    auto &MRI = MF->getRegInfo();
+
+    MCRegister Dest32 = MI->getOperand(1).getReg().asMCReg();
+    MCRegister Dest64 = TRI->getMatchingSuperReg(Dest32,
+						 X86::sub_32bit,
+						 &X86::GR64RegClass);
+
+    int32_t Imm = MI->getOperand(2).getImm();
+
+    llvm::errs() << "Dest64 for Add32ri is: " << TRI->getRegAsmName(Dest64) << '\n';
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32)
+	.addReg(Dest32);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Dest64)
+	.addReg(Dest64)
+	.addImm(1ULL << 31ULL); // 2**31
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Dest64)
+	.addReg(Dest64)
+	.addImm(1ULL << 31ULL); // 2**31
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64ri32), Dest64)
+	.addReg(Dest64)
+	.addImm(Imm);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32)
+	.addReg(Dest32);
+}
+
 void X86_64CompSimpMitigationPass::insertSafeAdd32ri8Before(MachineInstr *MI) {
   /**
    * add ecx, mem
@@ -7696,6 +7736,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
+  case X86::ADD32ri: {
+    insertSafeAdd32riBefore(MI);
+    llvm::errs() << "TODO: insert CS stats collecting for ADD32ri\n";
+    MI->eraseFromParent();
+    break;
+  }
   // case X86::ADC32mi8: {
   //   insertSafeAdc32mi8Before(MI);
   //   updateStats(MI, 16);
@@ -8306,6 +8352,11 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addImm(0x25);
+	else if (Op == "ADD32ri") {
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri), X86::ESI)
+		.addReg(X86::ESI)
+		.addImm(0xFFFF'FFFFUL);
+	}
         else if (Op == "ADD32ri8") {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri8), X86::ESI)
 		.addReg(X86::ESI)
