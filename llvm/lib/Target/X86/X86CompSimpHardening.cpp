@@ -6575,33 +6575,40 @@ void X86_64CompSimpMitigationPass::insertSafeAdd32ri8Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+  MCRegister Dst32 = MI->getOperand(1).getReg().asMCReg();
+  int32_t Imm = static_cast<int32_t>(MI->getOperand(2).getImm());
+  
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32ri), Dst32)
+      .addReg(Dst32)
+      .addImm(Imm);
 
-  assert(Op1.isReg() && "Op1 is a reg");
+  // MachineOperand Op1 = MI->getOperand(1);
+  // MachineOperand Op2 = MI->getOperand(2);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R13D).add(Op2);
-  auto R1 = Op1.getReg();
-  auto R2 = X86::R13D;
+  // assert(Op1.isReg() && "Op1 is a reg");
 
-  auto Op2_64 =
-      TRI->getMatchingSuperReg(R2, X86::sub_32bit, &X86::GR64RegClass);
-  auto Op1_64 =
-      TRI->getMatchingSuperReg(R1, X86::sub_32bit, &X86::GR64RegClass);
+  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R13D).add(Op2);
+  // auto R1 = Op1.getReg();
+  // auto R2 = X86::R13D;
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11).addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), R2).addReg(R2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
-      .addReg(Op2_64)
-      .addImm(pow(2, 31));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
-      .addReg(Op2_64)
-      .addImm(pow(2, 31));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), Op1_64)
-      .addReg(Op1_64)
-      .addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), R1).addReg(R1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R11);
+  // auto Op2_64 =
+  //     TRI->getMatchingSuperReg(R2, X86::sub_32bit, &X86::GR64RegClass);
+  // auto Op1_64 =
+  //     TRI->getMatchingSuperReg(R1, X86::sub_32bit, &X86::GR64RegClass);
+
+  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11).addReg(Op2_64);
+  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), R2).addReg(R2);
+  // BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
+  //     .addReg(Op2_64)
+  //     .addImm(pow(2, 31));
+  // BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
+  //     .addReg(Op2_64)
+  //     .addImm(pow(2, 31));
+  // BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), Op1_64)
+  //     .addReg(Op1_64)
+  //     .addReg(Op2_64);
+  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), R1).addReg(R1);
+  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R11);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAdc32mi8Before(MachineInstr *MI) {
@@ -7653,12 +7660,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-  // case X86::ADD32ri8: {
-  //   insertSafeAdd32ri8Before(MI);
-  //   updateStats(MI, 14);
-  //   MI->eraseFromParent();
-  //   break;
-  // }
+  case X86::ADD32ri8: {
+    insertSafeAdd32ri8Before(MI);
+    updateStats(MI, 14);
+    MI->eraseFromParent();
+    break;
+  }
   // case X86::ADC32mi8: {
   //   insertSafeAdc32mi8Before(MI);
   //   updateStats(MI, 16);
@@ -8263,10 +8270,11 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addImm(0x25);
-        if (Op == "ADD32ri8")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri8), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x25);
+        if (Op == "ADD32ri8") {
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri8), X86::ESI)
+		.addReg(X86::ESI)
+		.addImm(1ULL << 7ULL);
+	}
         if (Op == "ADD64ri32")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri32), X86::RSI)
               .addReg(X86::RSI)
@@ -8335,10 +8343,6 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "ADD32ri8")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri8), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x25);
         if (Op == "ADC32mi8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADC32mi8))
               .addReg(X86::RSI)
