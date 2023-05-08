@@ -138,6 +138,7 @@ private:
   void insertSafeSub32OldBefore(MachineInstr *MI);
   void insertSafeSub64Before(MachineInstr *MI);
   void insertSafeSub64rmBefore(MachineInstr *MI);
+  void insertSafeAdd8riBefore(MachineInstr *MI);
   void insertSafeAdd16Before(MachineInstr *MI);
   void insertSafeAdd32Before(MachineInstr *MI);
   void insertSafeAdd32rmBefore(MachineInstr *MI);
@@ -6813,6 +6814,35 @@ void X86_64CompSimpMitigationPass::insertSafeAdd32Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), R1).addReg(R1);
 }
 
+void
+X86_64CompSimpMitigationPass::insertSafeAdd8riBefore(MachineInstr* MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+
+    MCRegister Dest8 = MI->getOperand(1).getReg().asMCReg();
+    int8_t Imm = MI->getOperand(2).getImm();
+
+    auto r10 = X86::R10;
+    auto r10b = X86::R10B;
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), r10)
+	.addImm(1ULL << 31ULL); // 2 ** 31
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), r10b)
+	.addReg(Dest8);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64ri32), r10)
+	.addReg(r10)
+	.addImm(Imm);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Dest8)
+	.addReg(r10b);
+}
+
 void X86_64CompSimpMitigationPass::insertSafeAdd16Before(MachineInstr *MI) {
   /**
    * sub cx, ax
@@ -7956,6 +7986,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     /////   assert(false && "support sub8");
     /////   break;
     ///// }
+  case X86::ADD8ri: {
+    insertSafeAdd8riBefore(MI);
+    llvm::errs() << "TODO: add CS stats tracking for ADD8ri\n";
+    MI->eraseFromParent();
+    break;
+  }
   // case X86::ADD16rr: {
   //   insertSafeAdd16Before(MI);
   //   updateStats(MI, 70);
@@ -8257,12 +8293,12 @@ static void setupTest(MachineFunction &MF) {
 		.addImm(73) //displacement
 		.addReg(0); //no segment reg
 	}
-        if (Op == "ADD64ri8") {
+        else if (Op == "ADD64ri8") {
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RSI)
               .addReg(X86::RSI)
               .addImm(0x25);
 	}
-        if (Op == "ADD64mi32")
+        else if (Op == "ADD64mi32")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi32))
 	    .addReg(X86::RSI)
               .addImm(1)
@@ -8270,16 +8306,16 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addImm(0x25);
-        if (Op == "ADD32ri8") {
+        else if (Op == "ADD32ri8") {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri8), X86::ESI)
 		.addReg(X86::ESI)
 		.addImm(1ULL << 7ULL);
 	}
-        if (Op == "ADD64ri32")
+        else if (Op == "ADD64ri32")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri32), X86::RSI)
               .addReg(X86::RSI)
               .addImm(0x25);
-        if (Op == "ADD64mi8")
+        else if (Op == "ADD64mi8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi8))
               .addReg(X86::RSI)
               .addImm(1)
@@ -8287,7 +8323,7 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addImm(0x25);
-        if (Op == "ADD64mr")
+        else if (Op == "ADD64mr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr))
               .addReg(X86::RSI)
               .addImm(1)
@@ -8295,7 +8331,7 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addReg(X86::RDX);
-        if (Op == "ADD64rm")
+        else if (Op == "ADD64rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64rm), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX)
@@ -8303,15 +8339,15 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "ADD64rr")
+        else if (Op == "ADD64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64rr), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX);
-        if (Op == "ADC64rr")
+        else if (Op == "ADC64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64rr), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX);
-        if (Op == "ADC64rm")
+        else if (Op == "ADC64rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64rm), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX)
@@ -8319,7 +8355,7 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "ADC64mr")
+        else if (Op == "ADC64mr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64mr))
               .addReg(X86::RSI)
               .addImm(1)
@@ -8327,15 +8363,15 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addReg(X86::RDX);
-        if (Op == "ADC32ri8")
+        else if (Op == "ADC32ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADC32ri8), X86::ESI)
               .addReg(X86::ESI)
               .addImm(0x25);
-        if (Op == "ADD32rr")
+        else if (Op == "ADD32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32rr), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "ADD32rm")
+        else if (Op == "ADD32rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32rm), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::RDX)
@@ -8343,7 +8379,7 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "ADC32mi8")
+        else if (Op == "ADC32mi8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADC32mi8))
               .addReg(X86::RSI)
               .addImm(1)
@@ -8351,7 +8387,7 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addImm(0x25);
-        if (Op == "ADD8rm")
+        else if (Op == "ADD8rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8rm), X86::SIL)
               .addReg(X86::SIL)
               .addReg(X86::RDX)
@@ -8359,35 +8395,35 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "AND64rr")
+        else if (Op == "AND64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::AND64rr), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX);
-        if (Op == "AND64ri32")
+        else if (Op == "AND64ri32")
           BuildMI(*MBB, &MI, DL, TII->get(X86::AND64ri32), X86::RSI)
               .addReg(X86::RSI)
               .addImm(0x25);
-        if (Op == "AND64ri8")
+        else if (Op == "AND64ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::AND64ri8), X86::RSI)
               .addReg(X86::RSI)
               .addImm(0x25);
-        if (Op == "AND32rr")
+        else if (Op == "AND32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::AND32rr), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "AND32ri8")
+        else if (Op == "AND32ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::AND32ri8), X86::ESI)
               .addReg(X86::ESI)
               .addImm(0x25);
-        if (Op == "AND32ri")
+        else if (Op == "AND32ri")
           BuildMI(*MBB, &MI, DL, TII->get(X86::AND32ri), X86::ESI)
               .addReg(X86::ESI)
               .addImm(0x25);
-        if (Op == "OR64rr")
+        else if (Op == "OR64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::OR64rr), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX);
-        if (Op == "OR64rm")
+        else if (Op == "OR64rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::OR64rm), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX)
@@ -8395,19 +8431,19 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "OR64ri8")
+        else if (Op == "OR64ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::OR64ri8), X86::RSI)
               .addReg(X86::RSI)
               .addImm(0x25);
-        if (Op == "OR32rr")
+        else if (Op == "OR32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::OR32rr), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "OR32ri8")
+        else if (Op == "OR32ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::OR32ri8), X86::ESI)
               .addReg(X86::ESI)
               .addImm(0x25);
-        if (Op == "OR8rm")
+        else if (Op == "OR8rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::OR8rm), X86::SIL)
               .addReg(X86::SIL)
               .addReg(X86::RDX)
@@ -8415,7 +8451,7 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "IMUL32rm")
+        else if (Op == "IMUL32rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rm), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::RDX)
@@ -8423,11 +8459,11 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "XOR64rr")
+        else if (Op == "XOR64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64rr), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX);
-        if (Op == "XOR64rm")
+        else if (Op == "XOR64rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64rm), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX)
@@ -8435,7 +8471,7 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "XOR64mr")
+        else if (Op == "XOR64mr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64mr))
               .addReg(X86::RSI)
               .addImm(1)
@@ -8443,11 +8479,11 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addReg(X86::RDX);
-        if (Op == "XOR32rr")
+        else if (Op == "XOR32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32rr), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "XOR32rm")
+        else if (Op == "XOR32rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32rm), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::RDX)
@@ -8455,14 +8491,14 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "XOR32ri8")
+        else if (Op == "XOR32ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32ri8), X86::ESI)
               .addReg(X86::ESI)
               .addImm(0x25);
-        // if (Op == "XOR8rr")
+        // else if (Op == "XOR8rr")
         //         BuildMI(*MBB, &MI, DL, TII->get(X86::XOR8rr),
         //         X86::SIL).addReg(X86::SIL).addReg(X86::DL);
-        if (Op == "XOR8rm")
+        else if (Op == "XOR8rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR8rm), X86::SIL)
               .addReg(X86::SIL)
               .addReg(X86::RDX)
@@ -8470,11 +8506,11 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "SUB64rr")
+        else if (Op == "SUB64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SUB64rr), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX);
-        if (Op == "SUB64rm")
+        else if (Op == "SUB64rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SUB64rm), X86::RSI)
               .addReg(X86::RSI)
               .addReg(X86::RDX)
@@ -8482,22 +8518,22 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "SUB32rr")
+        else if (Op == "SUB32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32rr), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "TEST32rr")
+        else if (Op == "TEST32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::TEST32rr))
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        // if (Op == "AND8rr")
+        // else if (Op == "AND8rr")
         //         BuildMI(*MBB, &MI, DL, TII->get(X86::AND8rr),
         //         X86::SIL).addReg(X86::SIL).addReg(X86::DL);
-        if (Op == "TEST8ri")
+        else if (Op == "TEST8ri")
           BuildMI(*MBB, &MI, DL, TII->get(X86::TEST8ri))
               .addReg(X86::SIL)
               .addImm(0x25);
-        if (Op == "TEST8mi")
+        else if (Op == "TEST8mi")
           BuildMI(*MBB, &MI, DL, TII->get(X86::TEST8mi))
               .addReg(X86::RSI)
               .addImm(1)
@@ -8505,39 +8541,44 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addImm(0x25);
-        if (Op == "AND16rr")
+        else if (Op == "AND16rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::AND16rr), X86::SI)
               .addReg(X86::SI)
               .addReg(X86::DX);
-        if (Op == "OR16rr")
+        else if (Op == "OR16rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::OR16rr), X86::SI)
               .addReg(X86::SI)
               .addReg(X86::DX);
-        if (Op == "XOR16rr")
+        else if (Op == "XOR16rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR16rr), X86::SI)
               .addReg(X86::SI)
               .addReg(X86::DX);
-        if (Op == "SUB16rr")
+        else if (Op == "SUB16rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SUB16rr), X86::SI)
               .addReg(X86::SI)
               .addReg(X86::DX);
-        if (Op == "ADD16rr")
+	else if (Op == "ADD8ri") {
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8ri), X86::SIL)
+		.addReg(X86::SIL)
+		.addImm(0xFF);
+	}
+        else if (Op == "ADD16rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD16rr), X86::SI)
               .addReg(X86::SI)
               .addReg(X86::DX);
-        if (Op == "OR8rr")
+        else if (Op == "OR8rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::OR8rr), X86::SIL)
               .addReg(X86::SIL)
               .addReg(X86::DL);
-        if (Op == "SUB8rr")
+        else if (Op == "SUB8rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr), X86::SIL)
               .addReg(X86::SIL)
               .addReg(X86::DL);
-        if (Op == "ADD8rr")
+        else if (Op == "ADD8rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8rr), X86::SIL)
               .addReg(X86::SIL)
               .addReg(X86::DL);
-        if (Op == "SUB32rm")
+        else if (Op == "SUB32rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32rm), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::RDX)
@@ -8545,67 +8586,67 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "SHR64rCL")
+        else if (Op == "SHR64rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64rCL), X86::RSI)
               .addReg(X86::RSI);
-        if (Op == "SHR32rCL")
+        else if (Op == "SHR32rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32rCL), X86::ESI)
               .addReg(X86::ESI);
-        if (Op == "SHL32rCL")
+        else if (Op == "SHL32rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL32rCL), X86::EDX)
               .addReg(X86::EDX);
-        /* if (Op == "SHR16rSIL") */
+        /* else if (Op == "SHR16rSIL") */
         /*   BuildMI(*MBB, &MI, DL, TII->get(X86::SHR16rSIL), X86::SI) */
         /*       .addReg(X86::SI); */
-        if (Op == "SHL16rCL")
+        else if (Op == "SHL16rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL16rCL), X86::SI)
               .addReg(X86::SI);
-        if (Op == "SHR8rCL")
+        else if (Op == "SHR8rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHR8rCL), X86::SIL)
               .addReg(X86::SIL);
-        if (Op == "SHL8rCL")
+        else if (Op == "SHL8rCL")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL8rCL), X86::SIL)
               .addReg(X86::SIL);
-        // if (Op == "SHR8ri")
+        // else if (Op == "SHR8ri")
         //         BuildMI(*MBB, &MI, DL, TII->get(X86::SHR8ri),
         //         X86::SIL).addReg(X86::SIL).addImm(0x25);
-        if (Op == "SHR32ri")
+        else if (Op == "SHR32ri")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32ri), X86::ESI)
               .addReg(X86::ESI)
               .addImm(0x25);
-        if (Op == "SHL32ri")
+        else if (Op == "SHL32ri")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL32ri), X86::ESI)
               .addReg(X86::ESI)
               .addImm(0x25);
-        if (Op == "SHL64ri")
+        else if (Op == "SHL64ri")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHL64ri), X86::RSI)
               .addReg(X86::RSI)
               .addImm(0x25);
-        if (Op == "SAR64ri")
+        else if (Op == "SAR64ri")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SAR64ri), X86::RSI)
               .addReg(X86::RSI)
               .addImm(0x25);
-        if (Op == "SHR64ri")
+        else if (Op == "SHR64ri")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64ri), X86::RSI)
               .addReg(X86::RSI)
               .addImm(0x25);
-        // if (Op == "SAR8r1")
+        // else if (Op == "SAR8r1")
         //         BuildMI(*MBB, &MI, DL, TII->get(X86::SAR8r1),
         //         X86::SIL).addReg(X86::SIL);
-        if (Op == "SHR32r1")
+        else if (Op == "SHR32r1")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32r1), X86::ESI)
               .addReg(X86::ESI);
-        if (Op == "SAR32r1")
+        else if (Op == "SAR32r1")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SAR32r1), X86::ESI)
               .addReg(X86::ESI);
-        if (Op == "MUL32r")
+        else if (Op == "MUL32r")
           BuildMI(*MBB, &MI, DL, TII->get(X86::MUL32r))
               .addReg(X86::ESI);
-        if (Op == "CMP64rr")
+        else if (Op == "CMP64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64rr))
               .addReg(X86::RSI)
               .addReg(X86::RDX);
-        if (Op == "CMP64rm")
+        else if (Op == "CMP64rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64rm))
               .addReg(X86::RSI)
               .addReg(X86::RDX)
@@ -8613,11 +8654,11 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "CMP32rr")
+        else if (Op == "CMP32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32rr))
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "CMP32rm")
+        else if (Op == "CMP32rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32rm))
               .addReg(X86::ESI)
               .addReg(X86::EDX)
@@ -8625,7 +8666,7 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "CMP32mr")
+        else if (Op == "CMP32mr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32mr))
               .addReg(X86::EDX)
               .addImm(1)
@@ -8633,28 +8674,28 @@ static void setupTest(MachineFunction &MF) {
               .addImm(0)
               .addReg(0)
               .addReg(X86::ESI);
-        if (Op == "CMP8rr")
+        else if (Op == "CMP8rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP8rr))
               .addReg(X86::SIL)
               .addReg(X86::DL);
-        if (Op == "SUB8rr")
+        else if (Op == "SUB8rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr), X86::SIL)
               .addReg(X86::SIL)
               .addReg(X86::DL);
-        if (Op == "SBB32rr")
+        else if (Op == "SBB32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::SBB32rr), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "IMUL32rr")
+        else if (Op == "IMUL32rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rr), X86::ESI)
               .addReg(X86::ESI)
               .addReg(X86::EDX);
-        if (Op == "VPXORrr")
+        else if (Op == "VPXORrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPXORrr))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "VPXORrm")
+        else if (Op == "VPXORrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPXORrm))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
@@ -8663,12 +8704,12 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "VPXORYrr")
+        else if (Op == "VPXORYrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPXORYrr))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
               .addReg(X86::YMM1);
-        if (Op == "VPXORYrm")
+        else if (Op == "VPXORYrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPXORYrm))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
@@ -8677,11 +8718,11 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "PXORrr")
+        else if (Op == "PXORrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "PXORrm")
+        else if (Op == "PXORrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::PXORrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RSI)
@@ -8689,19 +8730,19 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "VPORrr")
+        else if (Op == "VPORrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "VPORYrr")
+        else if (Op == "VPORYrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPORYrr), X86::YMM0)
               .addReg(X86::YMM0)
               .addReg(X86::YMM1);
-        if (Op == "PORrr")
+        else if (Op == "PORrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::PORrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "PORrm")
+        else if (Op == "PORrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::PORrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RSI)
@@ -8709,12 +8750,12 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "VPADDDrr")
+        else if (Op == "VPADDDrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDDrr))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "VPADDDrm")
+        else if (Op == "VPADDDrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDDrm))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
@@ -8723,12 +8764,12 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "VPADDDYrr")
+        else if (Op == "VPADDDYrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDDYrr))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
               .addReg(X86::YMM1);
-        if (Op == "VPADDDYrm")
+        else if (Op == "VPADDDYrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDDYrm))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
@@ -8737,12 +8778,12 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "VPADDQrr")
+        else if (Op == "VPADDQrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDQrr))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "VPADDQrm")
+        else if (Op == "VPADDQrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDQrm))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
@@ -8751,12 +8792,12 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "VPADDQYrr")
+        else if (Op == "VPADDQYrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDQYrr))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
               .addReg(X86::YMM1);
-        if (Op == "VPADDQYrm")
+        else if (Op == "VPADDQYrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPADDQYrm))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
@@ -8765,11 +8806,11 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "PADDQrr")
+        else if (Op == "PADDQrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrr), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "PADDQrm")
+        else if (Op == "PADDQrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrm), X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::RSI)
@@ -8777,12 +8818,12 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "VPANDrr")
+        else if (Op == "VPANDrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPANDrr))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "VPANDrm")
+        else if (Op == "VPANDrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPANDrm))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
@@ -8791,11 +8832,11 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "PANDrr")
+        else if (Op == "PANDrr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::PANDrr))
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
-        if (Op == "PANDrm")
+        else if (Op == "PANDrm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::PANDrm))
               .addReg(X86::XMM0)
               .addReg(X86::RSI)
@@ -8803,19 +8844,19 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
-        if (Op == "VPSHUFBrr") {
+        else if (Op == "VPSHUFBrr") {
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPSHUFBrr))
               .addReg(X86::XMM0)
               .addReg(X86::XMM0)
               .addReg(X86::XMM1);
         }
-        if (Op == "VPSHUFBYrr") {
+        else if (Op == "VPSHUFBYrr") {
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPSHUFBYrr))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
               .addReg(X86::YMM1);
         }
-        if (Op == "VPSHUFBYrm") {
+        else if (Op == "VPSHUFBYrm") {
           BuildMI(*MBB, &MI, DL, TII->get(X86::VPSHUFBYrm))
               .addReg(X86::YMM0)
               .addReg(X86::YMM0)
