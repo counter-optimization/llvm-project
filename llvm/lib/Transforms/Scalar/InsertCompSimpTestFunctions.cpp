@@ -69,9 +69,9 @@ void InsertCompSimpTestFunctions::createSilentStoresFunction(std::string Inst) {
 void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
   std::vector<std::string> CSInsts{
       "ADD64ri8",  "ADD64ri32", "ADD64mi32", "ADD64mi8",  "ADD64mr",
-      "ADD64rm",   "ADD64rr",   "ADC64rr",   "ADC64rm",   "ADC64mr",
-      "ADC64ri8",  "ADD32rr",   "ADD32rm",   "ADD32ri8",  "ADD32i32",
-      "ADC32mi8",  "ADD8rm",    "AND64rr",   "AND64i32",  "AND64ri32",
+      "ADD64rm",   "ADD64rr",   
+      "ADD32rr",   "ADD32rm",   "ADD32ri8",  "ADD32i32",
+      "ADD8rm",    "AND64rr",   "AND64i32",  "AND64ri32",
       "AND64ri8",  "AND32rr",   "AND32ri8",  "AND32ri",   "AND32i32",
       "OR64rr",    "OR64rm",    "OR64ri8",   "OR32rr",    "OR32ri8",
       "OR8rm",     "MUL64m",    "IMUL32rm",  "XOR64rr",   "XOR64rm",
@@ -93,7 +93,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "VPSHUFBYrm"};
   
   std::vector<std::string> SSInsts{
-    "ADD64mr", "XOR64mr"
+    "ADD64mr", "XOR64mr", "ADD64mi32"
   };
   
   for (auto S : CSInsts) {

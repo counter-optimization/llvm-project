@@ -773,6 +773,59 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
     break;
   }
+  case X86::ADD64mi32: {
+    MachineOperand& BaseRegMO = MI.getOperand(0);
+    MachineOperand& ScaleMO = MI.getOperand(1);
+    MachineOperand& IndexMO = MI.getOperand(2);
+    MachineOperand& OffsetMO = MI.getOperand(3);
+    MachineOperand& SegmentMO = MI.getOperand(4);
+    MachineOperand& SrcMO = MI.getOperand(5);
+
+    Remove.push_back(&MI);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
+      .addReg(X86::R12)
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO);
+
+    int64_t Imm = SrcMO.getImm();
+    Imm = ~Imm + 1;
+    // int64_t Imm = 46464;
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R11)
+      .addReg(X86::R12);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R11)
+      .addReg(X86::R11)
+      .addImm(Imm);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+      .addReg(X86::R11B);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R12)
+      .addReg(X86::R12);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO)
+      .addReg(X86::R12);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO)
+      .addReg(X86::R11);
+    
+    break;
+  }
   case X86::MOV32mr:
   case X86::MOV32mi: {
     auto &BaseRegMO = MI.getOperand(0);
@@ -2186,6 +2239,16 @@ static void setupTest(MachineFunction &MF) {
 	      .addImm(0)
 	      .addReg(0)
 	      .addReg(X86::RDX);
+	  }
+
+	  else if (Op == "ADD64mi32") {
+	    changedOpcode = X86::ADD64mi32;
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi32), X86::RSI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0)
+	      .addReg(0)
+	      .addImm(17);
 	  }
 	}
 	
