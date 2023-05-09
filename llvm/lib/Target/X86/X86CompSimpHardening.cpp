@@ -138,6 +138,7 @@ private:
   void insertSafeSub32OldBefore(MachineInstr *MI);
   void insertSafeSub64Before(MachineInstr *MI);
   void insertSafeSub64rmBefore(MachineInstr *MI);
+    void insertSafeAdd8rmBefore(MachineInstr *MI);
   void insertSafeAdd8riBefore(MachineInstr *MI);
   void insertSafeAdd16Before(MachineInstr *MI);
   void insertSafeAdd32Before(MachineInstr *MI);
@@ -7641,6 +7642,55 @@ X86_64CompSimpMitigationPass::insertSafeLea64rBefore(MachineInstr *MI)
 	.addReg(X86::R10);    
 }
 
+void
+X86_64CompSimpMitigationPass::insertSafeAdd8rmBefore(MachineInstr* MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+    auto &MRI = MF->getRegInfo();
+
+    MCRegister Dst8 = MI->getOperand(1).getReg().asMCReg();
+
+    MachineOperand& Base = MI->getOperand(2);
+    MachineOperand& Scale = MI->getOperand(3);
+    MachineOperand& Idx = MI->getOperand(4);
+    MachineOperand& Offset = MI->getOperand(5);
+    MachineOperand& Segment = MI->getOperand(6);
+
+    // Load the value from memory
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rm), X86::R12B)
+	.add(Base)
+	.add(Scale)
+	.add(Idx)
+	.add(Offset)
+	.add(Segment);
+
+    // do the ADD8rr transform
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	.addImm(1ULL << 31ULL);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	.addReg(Dst8);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	.addImm(1ULL << 31ULL);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	.addReg(X86::R12B);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), X86::R10)
+	.addReg(X86::R10)
+	.addReg(X86::R11);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Dst8)
+	.addReg(X86::R10B);
+
+}
+
 void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, MachineFunction& MF) {
   /* llvm::errs() << "mitigating: " << *MI << "\n"; */
   const auto &STI = MF.getSubtarget();
@@ -7748,11 +7798,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   //   MI->eraseFromParent();
   //   break;
   // }
-  ///// case X86::ADD8rm: {
-  /////   MI->dump();
-  /////   assert(false && "comp simp todo");
-  /////   break;
-  ///// }
+  case X86::ADD8rm: {
+      insertSafeAdd8rmBefore(MI);
+      llvm::errs() << "TODO: compsimp cs statistics for ADD8rm\n";
+      MI->eraseFromParent();
+      break;
+  }
   case X86::AND64rr: {
     insertSafeAnd64Before(MI);
     updateStats(MI, 18);
