@@ -355,154 +355,123 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   bool OpcodeSupported = true;
 
   switch (MI.getOpcode()) {
+  case X86::MOV8mr_NOREX:
   case X86::MOV8mr:
   case X86::MOV8mi: {
-    auto NumOperands = MI.getNumOperands();
-    auto &BaseRegMO = MI.getOperand(0);
-    auto &ScaleMO = MI.getOperand(1);
-    auto &IndexMO = MI.getOperand(2);
-    auto &OffsetMO = MI.getOperand(3);
-    auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+      MachineOperand& Base = MI.getOperand(0);
+      MachineOperand& Scale = MI.getOperand(1);
+      MachineOperand& Idx = MI.getOperand(2);
+      MachineOperand& Offset = MI.getOperand(3);
+      MachineOperand& Segment = MI.getOperand(4);
 
-    /* Handle EFLAGS
-     * mov r10 eax
-     * mov eax eflags
-     *
-     * mov eflags eax
-     * mov eax 10
-     *
-     * or
-     *
-     * blind move
-     * push eflags
-     * pop r10
-     *
-     * push r10
-     * pop eflags
-     * blind move
-     */
+      // An immediate or a register, so keep as MachineOperand
+      MachineOperand& Src8 = MI.getOperand(5);
 
-    /* EFLAG hack 1
-     * MachineInstr *Push = BuildMI(MBB, MI, DL, TII->get(X86::PUSHF32));
-     * Push->getOperand(2).setIsUndef();
-     * Push->getOperand(3).setIsUndef();
-     */
+      uint64_t TwoToThirtyOne = 1ULL << 31ULL;
 
-    // EFLAG hack 2
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(X86::RAX);
-    BuildMI(MBB, MI, DL, TII->get(X86::LAHF));
+      // Save flags
+      // save them into R12 while preserving RAX (since LAHF writes
+      // the upper 8 bits of AX (AH not AL).
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	      .addReg(X86::RAX);
+	  BuildMI(MBB, MI, DL, TII->get(X86::LAHF));
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	      .addReg(X86::RAX);
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	      .addReg(X86::R10);
+      }
 
-    // TODO Use XCHG
-    // BuildMI(MBB, MI, DL,
-    // TII->get(X86::XCHG64rr)).addReg(X86::RAX).addReg(X86::R10).addReg(X86::RAX).addReg(X86::R10);
+      // Load the 8-bit value at the memory address,
+      // take the *high* 4 bit nibble,
+      // flip those bits
+      // this value != the memory contents value
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R10D)
+	      .addImm(TwoToThirtyOne);
 
-    /* EFLAG hack 3
-     * MachineInstr *Push = BuildMI(MBB, MI, DL, TII->get(X86::PUSHF32));
-     * Push->getOperand(2).setIsUndef();
-     * Push->getOperand(3).setIsUndef();
-     * BuildMI(MBB, MI, DL, TII->get(X86::POP32r)).addReg(X86::R10D);
-     */
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment);
 
-    Register B, S, I, D;
-    if (BaseRegMO.isReg())
-      B = getEqR10(BaseRegMO.getReg());
-    if (DestRegMO.isReg())
-      D = getEqR10(DestRegMO.getReg());
-    if (SegmentMO.isReg())
-      S = getEqR10(SegmentMO.getReg());
-    if (IndexMO.isReg())
-      I = getEqR10(IndexMO.getReg());
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addImm(TwoToThirtyOne & (0xF0ULL)); // (2**31) & 0xF0
 
-    auto MOV1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R11B)
-                    .addReg(B)
-                    .add(ScaleMO);
-    if (IndexMO.isReg())
-      MOV1.addReg(I);
-    else
-      MOV1.add(IndexMO);
-    MOV1.add(OffsetMO);
-    if (SegmentMO.isReg())
-      MOV1.addReg(S);
-    else
-      MOV1.add(SegmentMO);
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	      .addReg(X86::R10B);
+      }
 
-    BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), Register(X86::R11B))
-        .addUse(X86::R11B)
-        .addImm(0xF0);
+      // save the last flipped bit value into R11 while prepping R11
+      // for a save AND and OR
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R11D)
+	      .addImm(TwoToThirtyOne);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
-        .addReg(Register(X86::R11B));
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	      .addReg(X86::R10B);
+      }
 
-    auto MOV2 =
-        BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr)).addReg(B).add(ScaleMO);
-    if (IndexMO.isReg())
-      MOV2.addReg(I);
-    else
-      MOV2.add(IndexMO);
-    MOV2.add(OffsetMO);
-    if (SegmentMO.isReg())
-      MOV2.addReg(S);
-    else
-      MOV2.add(SegmentMO);
-    MOV2.addDef(X86::R11B);
+      // Load the 8-bit value we want to store to the memory address
+      // take the *low* 4 bit nibble,
+      // flip those bits
+      // this value != the Src8 Value
+      {
+	  auto MovOfSrc = Src8.isImm() ? X86::MOV8ri : X86::MOV8rr;
+	  BuildMI(MBB, MI, DL, TII->get(MovOfSrc), X86::R10B)
+	      .add(Src8);
 
-    if (DestRegMO.isImm()) {
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R11B)
-          .addImm(DestRegMO.getImm());
-    } else {
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(D);
-    }
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addImm(TwoToThirtyOne & 0x0FULL);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
-        .addUse(X86::R11B)
-        .addImm(0x0F);
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	      .addReg(X86::R10B);
+      }
 
-    BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
-        .addReg(Register(X86::R11B));
+      // combine the low 4 bit nibble, high 4 bit nibble into
+      // the final blinding value that is != Src8 and != memory content
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR8rr), X86::R10B)
+	      .addReg(X86::R10B)
+	      .addReg(X86::R11B);
 
-    auto OR1 = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B)
-                   .addUse(X86::R11B)
-                   .addReg(B)
-                   .add(ScaleMO);
-    if (IndexMO.isReg())
-      OR1.addReg(I);
-    else
-      OR1.add(IndexMO);
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .addReg(X86::R10B);
+	  
+	  auto MovOfSrc = Src8.isImm() ? X86::MOV8mi : X86::MOV8mr;
+	  BuildMI(MBB, MI, DL, TII->get(MovOfSrc))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .add(Src8);
+      }
 
-    OR1.add(OffsetMO);
-    if (SegmentMO.isReg())
-      OR1.addReg(S);
-    else
-      OR1.add(SegmentMO);
+      // Restore the saved flags out of R12 while preserving RAX
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	      .addReg(X86::RAX);
 
-    auto MOV3 = BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-                    .addReg(B)     // Base
-                    .add(ScaleMO); // Scale
-    if (IndexMO.isReg())
-      MOV3.addReg(I);
-    else
-      MOV3.add(IndexMO);
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	      .addReg(X86::R12);
 
-    MOV3.add(OffsetMO); // Disp/offset
-    if (SegmentMO.isReg())
-      MOV3.addReg(S);
-    else
-      MOV3.add(SegmentMO);
+	  BuildMI(MBB, MI, DL, TII->get(X86::SAHF));
 
-    MOV3.addReg(X86::R11B);
-
-    // TODO Use XCHG
-    // BuildMI(MBB, MI, DL,
-    // TII->get(X86::XCHG64rr),X86::RAX).addReg(X86::R10).addUse(X86::RAX).addUse(X86::R10);
-    BuildMI(MBB, MI, DL, TII->get(X86::SAHF));
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R10);
-
-    /* EFLAG hack 3
-     * BuildMI(MBB, MI, DL, TII->get(X86::PUSH32r)).addReg(X86::R10D);
-     * MachineInstr *Pop = BuildMI(MBB, MI, DL, TII->get(X86::POPF32));
-     */
-    break;
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	      .addReg(X86::R10);
+      }
+    
+      break;
   }
   case X86::MOV16mr:
   case X86::MOV16mi: {
@@ -696,6 +665,59 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .add(SegmentMO)
 	  .addReg(X86::R11);
       
+      break;
+  }
+  case X86::ADD8mr: {
+      Remove.push_back(&MI);
+
+      auto &BaseRegMO = MI.getOperand(0);
+      auto &ScaleMO = MI.getOperand(1);
+      auto &IndexMO = MI.getOperand(2);
+      auto &OffsetMO = MI.getOperand(3);
+      auto &SegmentMO = MI.getOperand(4);
+
+      MCRegister Src8 = MI.getOperand(5).getReg().asMCReg();
+
+      // load the memory contents (byte) into R12B
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R12B)
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO);
+
+      // ADD8rr CS transform on R12B as dest, Src8 as src reg
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	      .addImm(1ULL << 31ULL); // 2**31
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	      .addReg(X86::R12B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	      .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	      .addReg(Src8);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::ADD64rr), X86::R10)
+	      .addReg(X86::R10)
+	      .addReg(X86::R11);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+	      .addReg(X86::R10B);
+      }
+
+      // blinding store of the ADD8rr transform result in R12B
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO);
+      }
+
       break;
   }
   case X86::ADD64mr: {
@@ -2376,6 +2398,39 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addImm(Imm);
+		    }
+		    else if (Op == "MOV8mr_NOREX") {
+			changedOpcode = X86::MOV8mr_NOREX;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr_NOREX))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DL);
+		    }
+		    else if (Op == "MOV8mr") {
+			changedOpcode = X86::MOV8mr;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DL);
+		    }
+		    else if (Op == "MOV8mi") {
+			changedOpcode = X86::MOV8mi;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mi))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(137);
 		    }
 		}
 	
