@@ -357,6 +357,86 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   bool OpcodeSupported = true;
 
   switch (MI.getOpcode()) {
+  case X86::AND8mi: {
+      Remove.push_back(&MI);
+
+      MachineOperand& Base = MI.getOperand(0);
+      MachineOperand& Scale = MI.getOperand(1);
+      MachineOperand& Idx = MI.getOperand(2);
+      MachineOperand& Offset = MI.getOperand(3);
+      MachineOperand& Segment = MI.getOperand(4);
+
+      int64_t Imm8 = MI.getOperand(5).getImm();
+
+      // set up R10D for later CS-safe bitwise-and
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R10D)
+	  .addImm(1ULL << 16ULL);
+
+      // load memory contents into R10B
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	  .add(Base)
+	  .add(Scale)
+	  .add(Idx)
+	  .add(Offset)
+	  .add(Segment);
+
+      // copy it into R11B for later computing blinding value
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R11D)
+	  .addImm(1ULL << 31ULL);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	  .addReg(X86::R10B);
+      BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
+	  .addReg(X86::R11D)
+	  .addImm((1ULL << 31ULL) | 0xF0ULL);
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+	  .addReg(X86::R11B);
+
+      // perform safe AND8ri (really AND64ri8 inside of transform) on R10B
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND64ri8), X86::R10)
+	      .addReg(X86::R10)
+	      .addImm(Imm8);
+      }
+
+      // compute the blinding value, do blinding store, do final store
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R12D)
+	      .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+	      .addReg(X86::R10B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R12D)
+	      .addReg(X86::R12D)
+	      .addImm((1ULL << 31ULL) | 0x0FULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R12B)
+	      .addReg(X86::R12B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR8rr), X86::R11B)
+	      .addReg(X86::R11B)
+	      .addReg(X86::R12B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .addReg(X86::R11B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .addReg(X86::R10B);
+      }
+
+      
+      break;
+  }
   case X86::MOV8mr_NOREX:
   case X86::MOV8mr:
   case X86::MOV8mi: {
@@ -886,6 +966,86 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
     break;
   }
+  case X86::ADD32mr: {
+      Remove.push_back(&MI);
+      
+      MachineOperand& BaseRegMO = MI.getOperand(0);
+      MachineOperand& ScaleMO = MI.getOperand(1);
+      MachineOperand& IndexMO = MI.getOperand(2);
+      MachineOperand& OffsetMO = MI.getOperand(3);
+      MachineOperand& SegmentMO = MI.getOperand(4);
+      
+      MCRegister Src32 = MI.getOperand(5).getReg().asMCReg();
+
+      // load the memory contents
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12D)
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), X86::R11D)
+	  .addReg(X86::R12D);
+
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), X86::R10D)
+	      .addReg(Src32);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R12)
+	      .addReg(X86::R12)
+	      .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R12)
+	      .addReg(X86::R12)
+	      .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R10)
+	      .addReg(X86::R10)
+	      .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R10)
+	      .addReg(X86::R10)
+	      .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::ADD64rr), X86::R12)
+	      .addReg(X86::R12)
+	      .addReg(X86::R10);
+
+	  // BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), X86::R12D)
+	  //     .addReg(X86::R12D);
+      }
+
+      // compute the blinding value
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	      .addReg(X86::R12B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT32r), X86::R11D)
+	      .addReg(X86::R11D);
+      }
+
+      // store blinding value and the result of ADD32rr
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO)
+	      .addReg(X86::R11D);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO)
+	      .addReg(X86::R12D);
+      }
+      
+      break;
+  }
   case X86::ADD32mi8: {
       MachineOperand& BaseRegMO = MI.getOperand(0);
       MachineOperand& ScaleMO = MI.getOperand(1);
@@ -896,7 +1056,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
       Remove.push_back(&MI);
 
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm))
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm)) 
 	  .addReg(X86::R12D)
 	  .add(BaseRegMO)
 	  .add(ScaleMO)
@@ -2396,6 +2556,17 @@ static void setupTest(MachineFunction &MF) {
 			    .addReg(X86::RDX);
 		    }
 
+		    else if (Op == "AND8mi") {
+			changedOpcode = X86::AND8mi;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::AND8mi))
+			    .addReg(X86::RSI)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(0xCCULL);
+		    }
 		    else if (Op == "XOR64mr") {
 			changedOpcode = X86::XOR64mr;
 			BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64mr), X86::RSI)
@@ -2439,6 +2610,17 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addImm(Imm);
+		    }
+		    else if (Op == "ADD32mr") {
+			changedOpcode = X86::ADD32mr;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mr))
+			    .addReg(X86::RSI)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::EDX);
 		    }
 		    else if (Op == "ADD8mr") {
 			changedOpcode = X86::ADD8mr;

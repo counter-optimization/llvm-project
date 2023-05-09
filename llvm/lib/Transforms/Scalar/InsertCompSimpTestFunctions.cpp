@@ -94,7 +94,8 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
   
   std::vector<std::string> SSInsts{
       "ADD64mr", "XOR64mr", "ADD64mi32", "ADD32mi8", "ADD64mi8",
-      "MOV8mr_NOREX", "MOV8mr", "MOV8mi", "ADD8mr"
+      "MOV8mr_NOREX", "MOV8mr", "MOV8mi", "ADD8mr", "ADD32mr",
+      "AND8mi",
   };
   
   for (auto S : CSInsts) {
