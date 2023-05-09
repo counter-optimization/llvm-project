@@ -1,4 +1,6 @@
 #include <fstream>
+#include <ios>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <cassert>
@@ -399,19 +401,9 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R10D)
 	      .addReg(X86::R10D)
-	      .addImm(TwoToThirtyOne & (0xF0ULL)); // (2**31) & 0xF0
+	      .addImm(TwoToThirtyOne | (0xF0ULL)); // (2**31) & 0xF0
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
-	      .addReg(X86::R10B);
-      }
-
-      // save the last flipped bit value into R11 while prepping R11
-      // for a save AND and OR
-      {
-	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R11D)
-	      .addImm(TwoToThirtyOne);
-
-	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
 	      .addReg(X86::R10B);
       }
 
@@ -420,16 +412,19 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       // flip those bits
       // this value != the Src8 Value
       {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R11D)
+	      .addImm(TwoToThirtyOne);
+	  
 	  auto MovOfSrc = Src8.isImm() ? X86::MOV8ri : X86::MOV8rr;
-	  BuildMI(MBB, MI, DL, TII->get(MovOfSrc), X86::R10B)
+	  BuildMI(MBB, MI, DL, TII->get(MovOfSrc), X86::R11B)
 	      .add(Src8);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R10D)
-	      .addReg(X86::R10D)
-	      .addImm(TwoToThirtyOne & 0x0FULL);
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
+	      .addReg(X86::R11D)
+	      .addImm(TwoToThirtyOne | 0x0FULL);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
-	      .addReg(X86::R10B);
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+	      .addReg(X86::R11B);
       }
 
       // combine the low 4 bit nibble, high 4 bit nibble into
