@@ -104,6 +104,7 @@ private:
   void insertSafeXor16Before(MachineInstr *MI);
   void insertSafeXor32Before(MachineInstr *MI);
   void insertSafeXor32rmBefore(MachineInstr *MI);
+    void insertSafeXor32riBefore(MachineInstr* MI);
   void insertSafeXor32ri8Before(MachineInstr *MI);
   void insertSafeXor64Before(MachineInstr *MI);
   void insertSafeXor64rmBefore(MachineInstr *MI);
@@ -3671,6 +3672,38 @@ void X86_64CompSimpMitigationPass::insertSafeXor64Before(MachineInstr *MI) {
       .addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1_16).addReg(X86::R10W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2_16).addReg(X86::R11W);
+}
+
+void
+X86_64CompSimpMitigationPass::insertSafeXor32riBefore(MachineInstr* MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+    auto &MRI = MF->getRegInfo();
+
+    MCRegister Dst32 = MI->getOperand(1).getReg().asMCReg();
+    int64_t Imm32 = MI->getOperand(2).getImm();
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	.addImm(1ULL << 33ULL);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10D)
+	.addReg(Dst32);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R10)
+	.addReg(X86::R10)
+	.addReg(X86::R11);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64ri32), X86::R10)
+	.addReg(X86::R10)
+	.addImm(Imm32);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dst32)
+	.addReg(X86::R10D);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeXor32ri8Before(MachineInstr *MI) {
@@ -7964,6 +7997,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
+  case X86::XOR32ri: {
+      insertSafeXor32riBefore(MI);
+      llvm::errs() << "TODO: implement cs stats for XOR32ri\n";
+      MI->eraseFromParent();
+      break;
+  }
   case X86::XOR32ri8: {
     insertSafeXor32ri8Before(MI);
     updateStats(MI, 39);
@@ -8649,13 +8688,14 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
+	else if (Op == "XOR32ri")
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32ri), X86::ESI)
+              .addReg(X86::ESI)
+              .addImm(0x25);
         else if (Op == "XOR32ri8")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32ri8), X86::ESI)
               .addReg(X86::ESI)
               .addImm(0x25);
-        // else if (Op == "XOR8rr")
-        //         BuildMI(*MBB, &MI, DL, TII->get(X86::XOR8rr),
-        //         X86::SIL).addReg(X86::SIL).addReg(X86::DL);
         else if (Op == "XOR8rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR8rm), X86::SIL)
               .addReg(X86::SIL)
