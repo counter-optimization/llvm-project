@@ -615,7 +615,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
     // load contents of memory into scratch R12
     BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12)
-	.addReg(BaseRegMO.getReg())
+	.add(BaseRegMO)
 	.add(ScaleMO)
 	.add(IndexMO)
 	.add(OffsetMO)

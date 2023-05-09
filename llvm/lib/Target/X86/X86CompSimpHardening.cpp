@@ -7086,43 +7086,44 @@ void X86_64CompSimpMitigationPass::insertSafeSub8rrBefore(MachineInstr *MI) {
    * movq rax, r11
    */ 
 
-  MachineBasicBlock *MBB = MI->getParent();
-  MachineFunction *MF = MBB->getParent();
-  DebugLoc DL = MI->getDebugLoc();
-  const auto &STI = MF->getSubtarget();
-  auto *TII = STI.getInstrInfo();
-  auto *TRI = STI.getRegisterInfo();
-  auto &MRI = MF->getRegInfo();
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+    auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+    MCRegister Dst8 = MI->getOperand(1).getReg().asMCReg();
+    MCRegister Src8 = MI->getOperand(2).getReg().asMCReg();
 
-  assert(Op1.isReg() && "Op1 is a reg");
-  assert(Op2.isReg() && "Op2 is a reg");
+    // Load Src8 into R10B with high bit set
+    {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R10D)
+	    .addImm(1ULL << 30ULL);
 
-  auto Op2_64 = TRI->getMatchingSuperReg(Op2.getReg(), X86::sub_32bit,
-                                         &X86::GR64RegClass);
-  auto Op1_64 = TRI->getMatchingSuperReg(Op1.getReg(), X86::sub_32bit,
-                                         &X86::GR64RegClass);
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	    .addReg(Src8);
+    }
 
-  auto Op2_32 = TRI->getSubReg(Op2_64, 6);
+    // Load Dst8 into R11B
+    {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	    .addReg(Dst8);
+    }
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11).addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(Op1_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op2_32)
-      .addReg(Op2_32);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
-      .addReg(Op2_64)
-      .addImm(pow(2, 31));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
-      .addReg(Op2_64)
-      .addImm(pow(2, 31));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R10)
-      .addReg(X86::R10)
-      .addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1.getReg())
-      .addReg(X86::R10B);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R11);
+    // do the sub
+    {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R11)
+	    .addReg(X86::R11)
+	    .addReg(X86::R10);
+    }
+
+    // mov the result into Dst8
+    {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Dst8)
+	    .addReg(X86::R11B);
+    }
 }
 
 void X86_64CompSimpMitigationPass::insertSafeSbb32Before(MachineInstr *MI) {
@@ -8145,12 +8146,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   ///   MI->eraseFromParent();
   ///   break;
   /// }
-  /// case X86::SUB8rr: {
-  ///   insertSafeSub8rrBefore(MI);
-  ///   updateStats(MI, 66);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
+  case X86::SUB8rr: {
+    insertSafeSub8rrBefore(MI);
+    updateStats(MI, 66);
+    MI->eraseFromParent();
+    break;
+  }
   /// case X86::CMP8rr: {
   ///   insertSafeCmp8rrBefore(MI);
   ///   updateStats(MI, 82);
@@ -8778,10 +8779,6 @@ static void setupTest(MachineFunction &MF) {
               .addReg(X86::ESI);
         else if (Op == "CMP8rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP8rr))
-              .addReg(X86::SIL)
-              .addReg(X86::DL);
-        else if (Op == "SUB8rr")
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr), X86::SIL)
               .addReg(X86::SIL)
               .addReg(X86::DL);
         else if (Op == "SBB32rr")
