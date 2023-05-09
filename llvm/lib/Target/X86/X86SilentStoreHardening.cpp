@@ -704,13 +704,59 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       }
 
       // blinding store of the ADD8rr transform result in R12B
+      // this is the MOV8mr transform
       {
+	  uint64_t TwoToThirtyOne = 1ULL << 31ULL;
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R10D)
+	      .addImm(TwoToThirtyOne);
+	  
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
 	      .add(BaseRegMO)
 	      .add(ScaleMO)
 	      .add(IndexMO)
 	      .add(OffsetMO)
 	      .add(SegmentMO);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addImm(TwoToThirtyOne | 0xF0ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	      .addReg(X86::R10B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11D)
+	      .addImm(TwoToThirtyOne);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	      .addReg(X86::R12B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
+	      .addReg(X86::R11D)
+	      .addImm(TwoToThirtyOne | 0x0FULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+	      .addReg(X86::R11B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR8rr), X86::R10B)
+	      .addReg(X86::R10B)
+	      .addReg(X86::R11B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO)
+	      .addReg(X86::R10B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO)
+	      .addReg(X86::R12B);
       }
 
       break;
@@ -2393,6 +2439,17 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addImm(Imm);
+		    }
+		    else if (Op == "ADD8mr") {
+			changedOpcode = X86::ADD8mr;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DL);
 		    }
 		    else if (Op == "MOV8mr_NOREX") {
 			changedOpcode = X86::MOV8mr_NOREX;
