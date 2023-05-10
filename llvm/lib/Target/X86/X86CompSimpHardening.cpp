@@ -7573,7 +7573,16 @@ X86_64CompSimpMitigationPass::insertSafeLea64rBefore(MachineInstr *MI)
     auto *TRI = STI.getRegisterInfo();
     auto &MRI = MF->getRegInfo();
 
-    MCRegister Dst64 = MI->getOperand(0).getReg().asMCReg();
+    MCRegister Dst64;
+    MCRegister Dst32;
+    if (X86::LEA64r == MI->getOpcode()) {
+	Dst64 = MI->getOperand(0).getReg().asMCReg();
+	Dst32 = TRI->getSubReg(Dst64, X86::sub_32bit);
+    } else if (X86::LEA64_32r == MI->getOpcode()) {
+	Dst32 = MI->getOperand(0).getReg().asMCReg();
+	Dst64 = TRI->getMatchingSuperReg(Dst32, X86::sub_32bit, &X86::GR64RegClass);
+    }
+    
     MCRegister Dst16 = TRI->getSubReg(Dst64, X86::sub_16bit);
     MCRegister Dst8 = TRI->getSubReg(Dst64, X86::sub_8bit);
 
@@ -7802,6 +7811,12 @@ X86_64CompSimpMitigationPass::insertSafeLea64rBefore(MachineInstr *MI)
 	    .addReg(X86::R11W);
     }
 
+    // clear top 32 bits of dst register
+    if (X86::LEA64_32r == MI->getOpcode()) {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dst32)
+	    .addReg(Dst32);
+    }
+
     // restore EFLAGS (saved in R13)
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10)
 	.addReg(X86::RAX);
@@ -7867,9 +7882,11 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   auto *TII = STI.getInstrInfo();
   
   switch (MI->getOpcode()) {
+  case X86::LEA64_32r: 
   case X86::LEA64r: {
     insertSafeLea64rBefore(MI);
     llvm::errs() << "TODO: ADD CS STATS COLLECTOR FOR LEA64r\n";
+    llvm::errs() << "TODO: ADD CS STATS COLLECTOR FOR LEA64_32r\n";
     MI->eraseFromParent();
     break;
   }
@@ -8579,6 +8596,14 @@ static void setupTest(MachineFunction &MF) {
 
 	if (Op == "LEA64r") {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::LEA64r), X86::RSI)
+		.addReg(X86::RDX) // base
+		.addImm(2) // scale
+		.addReg(X86::RCX) //index
+		.addImm(73) //displacement
+		.addReg(0); //no segment reg
+	}
+	else if (Op == "LEA64_32r") {
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::LEA64_32r), X86::ESI)
 		.addReg(X86::RDX) // base
 		.addImm(2) // scale
 		.addReg(X86::RCX) //index
