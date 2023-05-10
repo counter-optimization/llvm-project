@@ -131,6 +131,7 @@ private:
   void insertSafeTest32Before(MachineInstr *MI);
   void insertSafeAnd32riBefore(MachineInstr *MI);
   void insertSafeAnd32ri8Before(MachineInstr *MI);
+    void insertSafeAnd64rmBefore(MachineInstr* MI);
   void insertSafeAnd64Before(MachineInstr *MI);
   void insertSafeAnd64ri32Before(MachineInstr *MI);
   void insertSafeAnd64ri8Before(MachineInstr *MI);
@@ -4587,6 +4588,66 @@ void X86_64CompSimpMitigationPass::insertSafeAnd64ri8Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::CMP64ri32), Op1).addImm(0);
 }
 
+void
+X86_64CompSimpMitigationPass::insertSafeAnd64rmBefore(MachineInstr* MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+
+    llvm::errs() << "AND64rm num operands: " << MI->getNumOperands() << '\n';
+
+    MCRegister Dst64 = MI->getOperand(1).getReg().asMCReg();
+    MCRegister Dst16 = TRI->getSubReg(Dst64, X86::sub_16bit);
+    MCRegister Dst8 = TRI->getSubReg(Dst64, X86::sub_8bit);
+
+    MachineOperand& Base = MI->getOperand(2);
+    MachineOperand& Scale = MI->getOperand(3);
+    MachineOperand& Index = MI->getOperand(4);
+    MachineOperand& Offset = MI->getOperand(5);
+    MachineOperand& Segment = MI->getOperand(6);
+
+    // load the memory contents into R12, R12 is now Src64
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
+	.add(Base)
+	.add(Scale)
+	.add(Index)
+	.add(Offset)
+	.add(Segment);
+    
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10)
+	.addImm(1ull << 16ull); // 2**16
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+	.addReg(Dst16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Dst16)
+	.addImm(1);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11)
+	.addImm(1ull << 16ull);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+	.addReg(X86::R12W);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::R12W)
+	.addImm(1);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), Dst64)
+	.addReg(Dst64)
+	.addReg(X86::R12);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10)
+	.addReg(X86::R10)
+	.addReg(X86::R11);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Dst16)
+	.addReg(X86::R10W);
+}
+
 void X86_64CompSimpMitigationPass::insertSafeAnd64Before(MachineInstr *MI) {
   /**
    *  andq rcx, rax
@@ -7913,6 +7974,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
       MI->eraseFromParent();
       break;
   }
+  case X86::AND64rm: {
+      insertSafeAnd64rmBefore(MI);
+      llvm::errs() << "TODO: compsimp cs statistics for AND64rm\n";
+      MI->eraseFromParent();
+      break;
+  }
   case X86::AND64rr: {
     insertSafeAnd64Before(MI);
     updateStats(MI, 18);
@@ -8517,6 +8584,15 @@ static void setupTest(MachineFunction &MF) {
 		.addReg(X86::RCX) //index
 		.addImm(73) //displacement
 		.addReg(0); //no segment reg
+	}
+	else if (Op == "AND64rm") {
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::AND64rm), X86::RSI)
+		.addReg(X86::RSI)
+		.addReg(X86::RDX)
+		.addImm(0)
+		.addReg(0)
+		.addImm(0)
+		.addReg(0);
 	}
         else if (Op == "ADD64ri8") {
           BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RSI)
