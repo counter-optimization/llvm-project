@@ -754,8 +754,8 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
     // compute the blinding value
     {
-	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
-	    .addReg(X86::R10);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	    .addReg(X86::R12);
 
 	BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
 	    .addReg(BaseRegMO.getReg())
