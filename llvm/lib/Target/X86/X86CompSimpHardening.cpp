@@ -9372,13 +9372,16 @@ static void setupTest(MachineFunction &MF) {
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::R15)
 	      .addReg(X86::RAX);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::LAHF));
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64ri), X86::RAX)
+	      .addReg(X86::RAX)
+	      .addImm(8ull);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))
 	      .addReg(X86::RDI)
 	      .addImm(0)
 	      .addReg(0)
-	      .addImm(0x80ull)
+	      .addImm(0x80ULL)
 	      .addReg(0)
-	      .addReg(X86::AH);
+	      .addReg(X86::AL);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::RAX)
 	    .addReg(X86::R15);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R15);
