@@ -77,7 +77,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "OR8rm",     "MUL64m",    "IMUL32rm",  "XOR64rr",   "XOR64rm",
       "XOR64mr",   "XOR32rr",   "XOR32rm",   "XOR32ri8",  "XOR8rr",
       "XOR8rm",    "SUB64rr",   "SUB64rm",   "SUB32rr",   "TEST32rr",
-      "AND8rr",    "TEST8ri",   "TEST8i8",   "TEST8mi",   "SHL8rCL",
+      "AND8rr",    "TEST8ri",   "TEST8i8",   "SHL8rCL",
       "SHR8ri",    "SAR8r1",    "SHR32rCL",  "SHR32ri",   "SHR32r1",
       "SHL32rCL",  "SHL32ri",   "SAR64ri",   "SHR64ri",   "XOR32ri",
       "SHL64ri",   "AND16rr",   "OR8rr",     "OR16rr",    "XOR16rr",
@@ -96,7 +96,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
   std::vector<std::string> SSInsts{
       "ADD64mr", "XOR64mr", "ADD64mi32", "ADD32mi8", "ADD64mi8",
       "MOV8mr_NOREX", "MOV8mr", "MOV8mi", "ADD8mr", "ADD32mr",
-      "AND8mi", "AND32mr"
+      "AND8mi", "AND32mr", "TEST8mi"
   };
   
   for (auto S : CSInsts) {

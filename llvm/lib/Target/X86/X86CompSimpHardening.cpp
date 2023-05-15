@@ -3124,34 +3124,26 @@ void X86_64CompSimpMitigationPass::insertSafeTest8riBefore(MachineInstr *MI) {
    *
    */
 
-  MachineBasicBlock *MBB = MI->getParent();
-  MachineFunction *MF = MBB->getParent();
-  DebugLoc DL = MI->getDebugLoc();
-  const auto &STI = MF->getSubtarget();
-  auto *TII = STI.getInstrInfo();
-  auto *TRI = STI.getRegisterInfo();
-  auto &MRI = MF->getRegInfo();
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+    auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(0);
-  MachineOperand MOp2 = MI->getOperand(1);
+    MCRegister Dst8 = MI->getOperand(0).getReg().asMCReg();
+    int64_t Imm8 = MI->getOperand(1).getImm();
 
-  assert(MOp1.isReg() && "Op1 is a reg");
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10)
+	.addImm(1ull << 16ull);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B).add(MOp1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R13B).add(MOp2);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	.addReg(Dst8);
 
-  auto Op1 = X86::R12B;
-  auto Op2 = X86::R13B;
-
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(65536);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(65536);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10)
-      .addReg(X86::R10)
-      .addReg(X86::R11);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1).addReg(X86::R10B);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2).addReg(X86::R11B);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::AND64ri8), X86::R10)
+	.addReg(X86::R10)
+	.addImm(Imm8);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAnd8riBefore(MachineInstr* MI)
@@ -6504,89 +6496,6 @@ void X86_64CompSimpMitigationPass::insertSafeCmp64rmBefore(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2_16).addReg(X86::R11W);
 }
 
-void X86_64CompSimpMitigationPass::insertSafeCmp64rrBefore(MachineInstr *MI) {
-  /**
-   *  cmp rcx rax
-   *
-   *    ↓
-   *
-   *  movq r12, rcx
-   *  movq r10, 2^48
-   *  movw r10w, r12w
-   *  movw r12w, 0xFFFF
-   *  movq r11, 2^48
-   *  movw r11w, ax
-   *  movw ax, 0xFFFF
-   *  rol r10, 16
-   *  rol r11, 16
-   *  ror r12, 16
-   *  ror rax, 16
-   *  sub r10d, r11d
-   *  sbb r12, rax
-   *  ror r10, 16
-   *  ror r11, 16
-   *  rol r12, 16
-   *  rol rax, 16
-   *  movw r12w, r10w
-   *  movw ax, r11w
-   */
-
-  MachineBasicBlock *MBB = MI->getParent();
-  MachineFunction *MF = MBB->getParent();
-  DebugLoc DL = MI->getDebugLoc();
-  const auto &STI = MF->getSubtarget();
-  auto *TII = STI.getInstrInfo();
-  auto *TRI = STI.getRegisterInfo();
-  auto &MRI = MF->getRegInfo();
-
-  MachineOperand MOp1 = MI->getOperand(0);
-  MachineOperand MOp2 = MI->getOperand(1);
-
-  assert(MOp1.isReg() && "Op1 is a reg");
-  assert(MOp2.isReg() && "Op2 is a reg");
-
-  /* llvm::errs() << "CTC "; MI->dump(); */
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12).addReg(MOp1.getReg());
-
-  auto Op1 = X86::R12;
-  auto Op2 = MOp2.getReg();
-
-  auto Op1_16 = TRI->getSubReg(Op1, 4);
-  auto Op2_16 = TRI->getSubReg(Op2, 4);
-
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R10).addImm(281474976710656 /* 2^48 */);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W).addReg(Op1_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op1_16).addImm(0x1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(281474976710656 /* 2^48 */);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(pow(2, 48));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W).addReg(Op2_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op2_16).addImm(0x1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R10)
-      .addReg(X86::R10)
-      .addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R11)
-      .addReg(X86::R11)
-      .addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op1).addReg(Op1).addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op2).addReg(Op2).addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32rr), X86::R10D)
-      .addReg(X86::R10D)
-      .addReg(X86::R11D);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SBB64rr), Op1).addReg(Op1).addReg(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R10)
-      .addReg(X86::R10)
-      .addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R11)
-      .addReg(X86::R11)
-      .addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Op1).addReg(Op1).addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Op2).addReg(Op2).addImm(16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1_16).addReg(X86::R10W);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2_16).addReg(X86::R11W);
-
-  /* BuildMI(*MBB, *MI, DL, TII->get(X86::SYSEXIT)); */
-}
-
 void X86_64CompSimpMitigationPass::insertSafeSub64Before(MachineInstr *MI) {
   /**
    *  subq rcx rax
@@ -7189,6 +7098,103 @@ void X86_64CompSimpMitigationPass::insertSafeCmp8rrBefore(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R11);
 }
 
+void X86_64CompSimpMitigationPass::insertSafeCmp64rrBefore(MachineInstr *MI) {
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+
+    MCRegister Dst64 = MI->getOperand(0).getReg().asMCReg();
+    MCRegister Src64 = MI->getOperand(1).getReg().asMCReg();
+
+    MCRegister Dst16 = TRI->getSubReg(Dst64, X86::sub_16bit);
+    MCRegister Src16 = TRI->getSubReg(Src64, X86::sub_16bit);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	.addReg(Dst64);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	.addImm(1ull << 48ull);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+	.addReg(Dst16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Dst16)
+	.addImm(1);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	.addImm(1ull << 48ull);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+	.addReg(Src16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Src16)
+	.addImm(1);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R10)
+	.addReg(X86::R10)
+	.addImm(16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R11)
+	.addReg(X86::R11)
+	.addImm(16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Dst64)
+	.addReg(Dst64)
+	.addImm(16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Src64)
+	.addReg(Src64)
+	.addImm(16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32rr), X86::R10D)
+	.addReg(X86::R10D)
+	.addReg(X86::R11D);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SBB64rr), Dst64)
+	.addReg(Dst64)
+	.addReg(Src64);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R10)
+	.addReg(X86::R10)
+	.addImm(16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R11)
+	.addReg(X86::R11)
+	.addImm(16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Src64)
+	.addReg(Src64)
+	.addImm(16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::RCL64ri), Dst64)
+	.addReg(Dst64)
+	.addImm(16);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Dst16)
+	.addReg(X86::R10W);
+
+    // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10)
+    // 	.addReg(X86::RA
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SETCCr), X86::R10B)
+	.addImm(X86::CondCode::COND_B);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::CMP64ri8), Dst64)
+	.addImm(0);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8), X86::R10)
+	.addImm(0);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Dst64)
+	.addReg(X86::R12);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Src16)
+	.addReg(X86::R11W);
+}
+
 void X86_64CompSimpMitigationPass::insertSafeCmp32rrBefore(MachineInstr *MI) {
   /**
    * sub ecx, eax
@@ -7211,8 +7217,11 @@ void X86_64CompSimpMitigationPass::insertSafeCmp32rrBefore(MachineInstr *MI) {
     auto *TII = STI.getInstrInfo();
     auto *TRI = STI.getRegisterInfo();
 
-    MCRegister Dst32 = MI->getOperand(1).getReg().asMCReg();
-    MCRegister Src32 = MI->getOperand(2).getReg().asMCReg();
+    MCRegister Dst32 = MI->getOperand(0).getReg().asMCReg();
+    MCRegister Src32 = MI->getOperand(1).getReg().asMCReg();
+
+    llvm::errs() << "CMP32rr, op1: " << TRI->getRegAsmName(Dst32) <<
+	", op2: " << TRI->getRegAsmName(Src32) << '\n';
     
     MCRegister Dst64 = TRI->getMatchingSuperReg(Dst32, X86::sub_32bit, &X86::GR64RegClass);
     MCRegister Src64 = TRI->getMatchingSuperReg(Src32, X86::sub_32bit, &X86::GR64RegClass);
@@ -7226,6 +7235,17 @@ void X86_64CompSimpMitigationPass::insertSafeCmp32rrBefore(MachineInstr *MI) {
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Src32)
 	.addReg(Src32);
 
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dst32)
+	.addReg(Dst32);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+	.addReg(Src64)
+	.addImm(1ull << 31ull);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+	.addReg(Src64)
+	.addImm(1ull << 31ull);
+
     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
 	.addReg(Src64)
 	.addImm(1ull << 31ull);
@@ -7238,12 +7258,15 @@ void X86_64CompSimpMitigationPass::insertSafeCmp32rrBefore(MachineInstr *MI) {
 	.addReg(Dst64)
 	.addReg(Src64);
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dst32)
-	.addReg(Dst32);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	.addReg(Dst64);
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32ri), Dst32)
 	.addReg(Dst32)
 	.addImm(0);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8), X86::R12)
+	.addImm(32);
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64)
 	.addReg(X86::R11);
@@ -8181,11 +8204,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-  // case X86::TEST8ri: {
-  //   insertSafeTest8riBefore(MI);
-  //   updateStats(MI, 47); MI->eraseFromParent();
-  //   break;
-  // }
+  case X86::TEST8ri: {
+    insertSafeTest8riBefore(MI);
+    updateStats(MI, 47);
+    MI->eraseFromParent();
+    break;
+  }
   case X86::TEST8i8: {
     insertSafeTest8i8Before(MI);
     updateStats(MI, 48);
@@ -8340,12 +8364,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-  /// case X86::CMP64rr: {
-  ///   insertSafeCmp64rrBefore(MI);
-  ///   updateStats(MI, 77);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
+  case X86::CMP64rr: {
+    insertSafeCmp64rrBefore(MI);
+    updateStats(MI, 77);
+    MI->eraseFromParent();
+    break;
+  }
   /// case X86::CMP64rm: {
   ///   insertSafeCmp64rmBefore(MI);
   ///   updateStats(MI, 78);
@@ -9003,7 +9027,7 @@ static void setupTest(MachineFunction &MF) {
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64rm))
               .addReg(X86::RSI)
               .addReg(X86::RDX)
-              .addImm(1)
+              .addImm(0)
               .addReg(0)
               .addImm(0)
               .addReg(0);
@@ -9015,7 +9039,7 @@ static void setupTest(MachineFunction &MF) {
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32rm))
               .addReg(X86::ESI)
               .addReg(X86::EDX)
-              .addImm(1)
+              .addImm(0)
               .addReg(0)
               .addImm(0)
               .addReg(0);
