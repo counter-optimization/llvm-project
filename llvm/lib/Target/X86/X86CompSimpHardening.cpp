@@ -6375,41 +6375,72 @@ void X86_64CompSimpMitigationPass::insertSafeCmp32rmBefore(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(0);
-  MachineOperand MOp2 = MI->getOperand(1);
-  MachineOperand MOp3 = MI->getOperand(2);
-  MachineOperand MOp4 = MI->getOperand(3);
-  MachineOperand MOp5 = MI->getOperand(4);
-  MachineOperand MOp6 = MI->getOperand(5);
+  MCRegister Dst32 = MI->getOperand(0).getReg().asMCReg();
+  MachineOperand& Base = MI->getOperand(1);
+  MachineOperand& Scale = MI->getOperand(2);
+  MachineOperand& Index = MI->getOperand(3);
+  MachineOperand& Disp = MI->getOperand(4);
+  MachineOperand& Segment = MI->getOperand(5);
 
-  assert(MOp1.isReg() && "Op1 is a reg");
+  MCRegister Dst64 = TRI->getMatchingSuperReg(Dst32, X86::sub_32bit, &X86::GR64RegClass);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(MOp1.getReg());
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12).add(MOp2).add(MOp3).add(MOp4).add(MOp5).add(MOp6);
+  MCRegister Src64 = X86::R13;
+  MCRegister Src32 = X86::R13D;
 
-  auto Op1 = X86::R10D;
-  auto Op2 = X86::R12D;
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rm), X86::R13D)
+      .add(Base)
+      .add(Scale)
+      .add(Index)
+      .add(Disp)
+      .add(Segment);
 
-  auto Op2_64 = TRI->getMatchingSuperReg(Op2, X86::sub_32bit,
-                                         &X86::GR64RegClass);
-  auto Op1_64 = TRI->getMatchingSuperReg(Op1, X86::sub_32bit,
-                                         &X86::GR64RegClass);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11)
+	.addReg(Src64);
+    
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	.addReg(Dst64);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11).addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op2)
-      .addReg(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
-      .addReg(Op2_64)
-      .addImm(pow(2, 31));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
-      .addReg(Op2_64)
-      .addImm(pow(2, 31));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Op1_64)
-      .addReg(Op1_64)
-      .addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op1)
-      .addReg(Op1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R11);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Src32)
+	.addReg(Src32);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dst32)
+	.addReg(Dst32);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+	.addReg(Src64)
+	.addImm(1ull << 31ull);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+	.addReg(Src64)
+	.addImm(1ull << 31ull);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+	.addReg(Src64)
+	.addImm(1ull << 31ull);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+	.addReg(Src64)
+	.addImm(1ull << 31ull);
+    
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Dst64)
+	.addReg(Dst64)
+	.addReg(Src64);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	.addReg(Dst64);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB32ri), Dst32)
+	.addReg(Dst32)
+	.addImm(0);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8), X86::R12)
+	.addImm(32);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64)
+	.addReg(X86::R11);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Dst64)
+	.addReg(X86::R10);
 }
 
 
@@ -7275,9 +7306,6 @@ void X86_64CompSimpMitigationPass::insertSafeCmp32rrBefore(MachineInstr *MI) {
     MCRegister Dst32 = MI->getOperand(0).getReg().asMCReg();
     MCRegister Src32 = MI->getOperand(1).getReg().asMCReg();
 
-    llvm::errs() << "CMP32rr, op1: " << TRI->getRegAsmName(Dst32) <<
-	", op2: " << TRI->getRegAsmName(Src32) << '\n';
-    
     MCRegister Dst64 = TRI->getMatchingSuperReg(Dst32, X86::sub_32bit, &X86::GR64RegClass);
     MCRegister Src64 = TRI->getMatchingSuperReg(Src32, X86::sub_32bit, &X86::GR64RegClass);
 
@@ -8437,12 +8465,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-  /// case X86::CMP32rm: {
-  ///   insertSafeCmp32rmBefore(MI);
-  ///   updateStats(MI, 80);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
+  case X86::CMP32rm: {
+    insertSafeCmp32rmBefore(MI);
+    updateStats(MI, 80);
+    MI->eraseFromParent();
+    break;
+  }
   /// case X86::CMP32mr: {
   ///   insertSafeCmp32mrBefore(MI);
   ///   updateStats(MI, 81);
@@ -9093,15 +9121,15 @@ static void setupTest(MachineFunction &MF) {
         else if (Op == "CMP32rm")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32rm))
               .addReg(X86::ESI)
-              .addReg(X86::EDX)
+              .addReg(X86::RDX)
               .addImm(0)
               .addReg(0)
               .addImm(0)
               .addReg(0);
         else if (Op == "CMP32mr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32mr))
-              .addReg(X86::EDX)
-              .addImm(1)
+              .addReg(X86::RDX)
+              .addImm(0)
               .addReg(0)
               .addImm(0)
               .addReg(0)
