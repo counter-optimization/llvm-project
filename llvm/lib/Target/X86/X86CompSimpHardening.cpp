@@ -3042,28 +3042,27 @@ void X86_64CompSimpMitigationPass::insertSafeTest8miBefore(MachineInstr *MI) {
 
   // TODO fix the mem operand
   // TODO is it index 1 or 0?
-  MachineOperand MOp1 = MI->getOperand(0);
-  MachineOperand MOp2 = MI->getOperand(1);
-  MachineOperand MOp3 = MI->getOperand(2);
-  MachineOperand MOp4 = MI->getOperand(3);
-  MachineOperand MOp5 = MI->getOperand(4);
-  MachineOperand MOp6 = MI->getOperand(5);
+  MachineOperand& Base = MI->getOperand(0);
+  MachineOperand& Scale = MI->getOperand(1);
+  MachineOperand& Index = MI->getOperand(2);
+  MachineOperand& Disp = MI->getOperand(3);
+  MachineOperand& Segment = MI->getOperand(4);
+  
+  int64_t Imm8 = MI->getOperand(5).getImm();
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R13).add(MOp6);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R14).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10)
+      .addImm(1ull << 16ull);
 
-  auto Op1 = X86::R14B;
-  auto Op2 = X86::R13B;
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+      .add(Base)
+      .add(Scale)
+      .add(Index)
+      .add(Disp)
+      .add(Segment);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(pow(2, 16));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::TEST64rr))
+  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64ri8), X86::R10)
       .addReg(X86::R10)
-      .addReg(X86::R11);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1).addReg(X86::R10B);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2).addReg(X86::R11B);
+      .addImm(Imm8);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeTest8i8Before(MachineInstr *MI) {
@@ -8412,12 +8411,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-    ///  case X86::TEST8mi: {
-    ///    insertSafeTest8miBefore(MI);
-    ///    updateStats(MI, 49);
-    ///    MI->eraseFromParent();
-    ///    break;
-    ///  }
+  case X86::TEST8mi: {
+      insertSafeTest8miBefore(MI);
+      updateStats(MI, 49);
+      MI->eraseFromParent();
+      break;
+  }
   case X86::SHL8rCL: {
     insertSafeShl8rClBefore(MI);
     updateStats(MI, 50);
