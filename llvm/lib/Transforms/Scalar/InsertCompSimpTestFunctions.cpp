@@ -83,7 +83,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "SHL64ri",   "AND16rr",   "OR8rr",     "OR16rr",    "XOR16rr",
       "SUB8rr",    "SUB32rm",   "ADD8rr",    "LEA64r",    "OR8ri",
       "ADD32rm",   "SHR64rCL",  "SHR32rCL",  "SHR16rCL",  "MUL32r",
-      "CMP64rr",   "CMP64rm",   "CMP32rr",   "CMP32rm",   "CMP32mr",
+      "CMP64rr",   "CMP64rm",   "CMP32rr",   "CMP32rm", 
       "CMP8rr",    "SBB32rr",   "IMUL32rr",  "IMUL32rm",  "VPXORrr",
       "VPXORrm",   "VPXORYrr",  "VPXORYrm",  "PXORrr",    "PXORrm",
       "VPORrr",    "VPORYrr",   "PORrr",     "PORrm",     "VPADDDrr",
