@@ -1380,59 +1380,98 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     // of the sensitive data, so it's already there.
     break;
   }
-  case X86::PUSH64i8:
+  case X86::PUSH64rmm: {
+      MachineOperand& Base = MI.getOperand(0);
+      MachineOperand& Scale = MI.getOperand(1);
+      MachineOperand& Idx = MI.getOperand(2);
+      MachineOperand& Disp = MI.getOperand(3);
+      MachineOperand& Segment = MI.getOperand(4);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11)
+	  .add(Base)
+	  .add(Scale)
+	  .add(Idx)
+	  .add(Disp)
+	  .add(Segment);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	  .addReg(X86::R10B);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R11)
+	  .addReg(X86::R11);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr), X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R11);
+      
+      break;
+  }
+  case X86::PUSH64i8: {
+      int64_t Imm8 = MI.getOperand(0).getImm();
+
+      // BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
+      // 	  .addReg(X86::R10)
+      // 	  .addReg(X86::RSP)
+      // 	  .addImm(0)
+      // 	  .addReg(0)
+      // 	  .addImm(-8)
+      // 	  .addReg(0);
+      addOffset(
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	      .addReg(X86::RSP), -8);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R10B)
+	  .addImm(Imm8);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R10);
+
+      break;
+  }
   case X86::PUSH64r: {
-    auto &DestRegMO = MI.getOperand(0);
+      MCRegister Src64 = MI.getOperand(0).getReg().asMCReg();
+      MCRegister Src8 = TRI->getSubReg(Src64, X86::sub_8bit);
 
-    // Insert insn to read the contents of destination address into R11
-    MachineInstr *MI2 = addOffset(
-        BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11).addReg(X86::RSP),
-        -8);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(0)
+	  .addReg(0);
 
-    if (DestRegMO.isImm()) {
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), Register(X86::R11B))
-          .addImm(DestRegMO.getImm());
-    } else {
-      auto SRIByte =
-          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AL));
-      auto SRIWord =
-          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::AX));
-      auto SRIDouble =
-          TRI->getSubRegIndex(MCRegister(X86::RAX), MCRegister(X86::EAX));
-      //  MI.print(llvm::errs());
-      //  llvm::errs() << "\n";
-      //  errs() << "SRIByte: " << SRIByte << '\n';
-      //  errs() << "SRIWord: " << SRIWord << '\n';
-      //  errs() << "SRIDouble: " << SRIDouble << '\n';
-      //  errs() << "Subregidx ax of eax: "
-      //         << TRI->getSubRegIndex(MCRegister(X86::EAX),
-      //                                MCRegister(X86::AX))
-      //         << '\n';
-      Register fixedWidthDestReg = DestRegMO.getReg();
-      if (8 < TRI->getRegSizeInBits(DestRegMO.getReg(), MRI)) {
-        // 1 should be the smallest, least significant subreg
-        fixedWidthDestReg = TRI->getSubReg(fixedWidthDestReg, 1);
-        BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Register(X86::R11B))
-            .addReg(fixedWidthDestReg);
-      }
-    }
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	  .addReg(Src8);
 
-    // Insert insn to bitwise not all of R11
-    BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), Register(X86::R11))
-        .addReg(Register(X86::R11));
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	  .addReg(X86::R10);
 
-    // PUSH64r R11
-    // MOV R11 to RSP
-    // mov r11, [rsp]
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
-        .addReg(X86::RSP) // Base
-        .addImm(1)        // Scale
-        .addReg(0)        // Index
-        .addImm(-8)       // Disp/offset
-        .addReg(0)        // Segment reg
-        .addReg(X86::R11);
-
-    break;
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R10);
+      
+      break;
   }
   case X86::MOVAPSmr: {
     auto &BaseRegMO = MI.getOperand(0);
@@ -2652,6 +2691,37 @@ static void setupTest(MachineFunction &MF) {
 			    .addReg(X86::RDX);
 		    }
 
+		    else if (Op == "PUSH64i8") {
+			changedOpcode = X86::PUSH64i8;
+			
+			BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64i8))
+			    .addImm(128);
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			    .addReg(X86::RAX);
+		    }
+
+		    else if (Op == "PUSH64rmm") {
+			changedOpcode = X86::PUSH64rmm;
+			
+			BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64rmm))
+			    .addReg(X86::RDX)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0);
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			    .addReg(X86::RAX);
+		    }
+
+		    else if (Op == "PUSH64r") {
+			changedOpcode = X86::PUSH64r;
+			
+			BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			    .addReg(X86::RSI);
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			    .addReg(X86::RAX);
+		    }
+
 		    else if (Op == "AND32mr") {
 			changedOpcode = X86::AND32mr;
 
@@ -2963,7 +3033,12 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
       std::vector<MachineInstr *> MIs;
       for (auto &MBB : MF) {
         for (auto &MI : MBB) {
-	  if (MI.getOpcode() == changedOpcode) {
+	    if (MI.getOpcode() == changedOpcode && changedOpcode == X86::PUSH64r) {
+		MCRegister Src64 = MI.getOperand(0).getReg().asMCReg();
+		if (Src64 == X86::RSI) {
+		    this->doX86SilentStoreHardening(MI, MBB, MF, Remove);
+		}
+	    } else if (MI.getOpcode() == changedOpcode) {
 	      this->doX86SilentStoreHardening(MI, MBB, MF, Remove);
 	  }
         }
