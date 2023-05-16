@@ -7141,23 +7141,27 @@ X86_64CompSimpMitigationPass::insertSafeAdd8riBefore(MachineInstr* MI)
     auto *TII = STI.getInstrInfo();
 
     MCRegister Dest8 = MI->getOperand(1).getReg().asMCReg();
-    int8_t Imm = MI->getOperand(2).getImm();
+    int64_t Imm = MI->getOperand(2).getImm();
 
     auto r10 = X86::R10;
     auto r10b = X86::R10B;
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), r10)
-	.addImm(1ULL << 31ULL); // 2 ** 31
+	.addImm(1ull << 31ull); // 2 ** 31
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), r10b)
 	.addReg(Dest8);
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64ri32), r10)
 	.addReg(r10)
-	.addImm(Imm);
+	.addImm(~(0x00FF00ull) & static_cast<uint64_t>(Imm));
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Dest8)
 	.addReg(r10b);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8))
+	.addReg(X86::R10)
+	.addImm(8);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAdd16Before(MachineInstr *MI) {
@@ -8104,6 +8108,10 @@ X86_64CompSimpMitigationPass::insertSafeAdd8rmBefore(MachineInstr* MI)
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Dst8)
 	.addReg(X86::R10B);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8))
+	.addReg(X86::R10)
+	.addImm(8);
 
 }
 
