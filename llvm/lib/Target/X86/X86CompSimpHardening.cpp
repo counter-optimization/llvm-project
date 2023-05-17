@@ -167,6 +167,7 @@ private:
   void insertSafeShr32Before(MachineInstr *MI);
   void insertSafeAdc64Before(MachineInstr *MI);
   void insertSafeAdc64rmBefore(MachineInstr *MI);
+    void insertSafeMul64rBefore(MachineInstr *MI);
   void insertSafeMul32rBefore(MachineInstr *MI);
   void insertSafeIMul32rrBefore(MachineInstr *MI);
   void insertSafeIMul32rmBefore(MachineInstr *MI);
@@ -5030,7 +5031,565 @@ void X86_64CompSimpMitigationPass::insertSafeIMul32rrBefore(MachineInstr *MI) {
       .addReg(X86::EAX);
 }
 
+void
+X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+
+    MCRegister rax = X86::RAX;
+    MCRegister eax = X86::EAX;
+    MCRegister rdx = X86::RDX;
+
+    MCRegister Src64;
+    MCRegister Src32;
+    MCRegister Src8;
+
+    int IsMemorySrc = MI->getOpcode() == X86::MUL64m;
+    int IsRaxSrc = MI->getOpcode() == X86::MUL64r &&
+	X86::RAX == MI->getOperand(0).getReg().asMCReg();
+    int ShouldUseRcxAsSrc = IsMemorySrc || IsRaxSrc;
+
+    if (MI->getOpcode() == X86::MUL64r) {
+	Src64 = MI->getOperand(0).getReg().asMCReg();
+	Src32 = TRI->getSubReg(Src64, X86::sub_32bit);
+	Src8 = TRI->getSubReg(Src64, X86::sub_8bit);
+    } else if (ShouldUseRcxAsSrc) {
+	Src64 = X86::RCX;
+	Src32 = X86::ECX;
+	Src8 = X86::CL;
+    } else {
+	assert(0 && "unreachable");
+    }
+
+    // save args
+    {
+	if (ShouldUseRcxAsSrc) {
+	    // then SS safe store RCX to stack
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
+		.addReg(X86::RSP)
+		.addImm(1)
+		.addReg(0)
+		.addImm(-8)
+		.addReg(0);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+		.addReg(X86::CL);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), X86::R12)
+		.addReg(X86::R12);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+		.addReg(X86::RSP)
+		.addImm(1)
+		.addReg(0)
+		.addImm(-8)
+		.addReg(0)
+		.addReg(X86::R12);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::RCX);
+	    
+	} else {
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10)
+		.addReg(Src64);
+	}
+
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11)
+	    .addReg(rax);
+    }
+
+    if (IsMemorySrc) {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::RCX)
+	    .add(MI->getOperand(0))
+	    .add(MI->getOperand(1))
+	    .add(MI->getOperand(2))
+	    .add(MI->getOperand(3))
+	    .add(MI->getOperand(4));
+    }
+
+    if (IsRaxSrc) {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RCX)
+	    .addReg(X86::RAX);
+    }
+    
+    // calculate first term
+    {
+	// prepare args
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), rdx)
+		.addImm(1ull << 63ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Src32)
+		.addReg(X86::R10D);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Src64)
+		.addReg(Src64)
+		.addReg(rdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), eax)
+		.addReg(X86::R11D);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(rdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+		.addReg(rax);
+	}
+
+	// perform safe mul
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MUL64r), Src64);
+	}
+
+	// revert mask in result
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64)
+		.addReg(Src64)
+		.addImm(63);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(63);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R12B)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::DL)
+		.addReg(X86::AL);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL)
+		.addImm(2);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::RAX)
+		.addReg(X86::RAX)
+		.addReg(Src64);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::RAX)
+		.addReg(X86::RAX)
+		.addReg(X86::R12);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL)
+		.addReg(X86::DL);
+	}
+
+	// save the result
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R13)
+		.addReg(rax);
+	}
+    }
+
+    // calculate 2nd term
+    {
+	// prepare arguments
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), rdx)
+		.addImm(1ull << 63ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Src32)
+		.addReg(X86::R10D);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Src64)
+		.addReg(Src64)
+		.addReg(rdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rax)
+		.addReg(X86::R11);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), rax)
+		.addReg(rax)
+		.addImm(32);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(rdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+		.addReg(rax);
+	}
+
+	// perform safe mul
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MUL64r), Src64);
+	}
+
+	// revert mask in result
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64)
+		.addReg(Src64)
+		.addImm(63);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(63);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R12B)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::DL)
+		.addReg(X86::AL);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL)
+		.addImm(2);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(Src64);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(X86::R12);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL)
+		.addReg(X86::DL);
+
+	    // safe push (SS push64r of RAX)
+	    // r12 is free for scratch here, rax has important data
+	    {
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
+		    .addReg(X86::R12)
+		    .addReg(X86::RSP)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(-8)
+		    .addReg(0);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+		    .addReg(X86::AL);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), X86::R12)
+		    .addReg(X86::R12);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+		    .addReg(X86::RSP)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(-8)
+		    .addReg(0)
+		    .addReg(X86::R12);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rax);
+	    }
+	}
+    }
+
+    // calculate 3rd term
+    {
+	// prepare args
+	{ 
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), rdx)
+		.addImm(1ull << 63ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64)
+		.addReg(X86::R10);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), Src64)
+		.addReg(Src64)
+		.addImm(32);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Src64)
+		.addReg(Src64)
+		.addReg(rdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), eax)
+		.addReg(X86::R11D);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(rdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+		.addReg(rax);
+	}
+
+	// perform safe mul
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MUL64r), Src64);
+	}
+
+	// revert mask in result
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64)
+		.addReg(Src64)
+		.addImm(63);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(63);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R12B)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::DL)
+		.addReg(X86::AL);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL)
+		.addImm(2);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(Src64);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(X86::R12);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL)
+		.addReg(X86::DL);
+
+	    // safe push (SS push64r of RAX)
+	    // r12 is free for scratch here, rax has important data
+	    {
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
+		    .addReg(X86::R12)
+		    .addReg(X86::RSP)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(-8)
+		    .addReg(0);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+		    .addReg(X86::AL);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), X86::R12)
+		    .addReg(X86::R12);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+		    .addReg(X86::RSP)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(-8)
+		    .addReg(0)
+		    .addReg(X86::R12);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rax);
+	    }
+	}
+    }
+
+    // calculate 4th term
+    {
+	// prepare arguments
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), rdx)
+		.addImm(1ull << 63ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64)
+		.addReg(X86::R10);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), Src64)
+		.addReg(Src64)
+		.addImm(32);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Src64)
+		.addReg(Src64)
+		.addReg(rdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rax)
+		.addReg(X86::R11);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), rax)
+		.addReg(rax)
+		.addImm(32);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(rdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+		.addReg(rax);
+	}
+
+	// perform safe mul
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MUL64r), Src64);
+	}
+
+	// revert mask in result
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64)
+		.addReg(Src64)
+		.addImm(63);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(63);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R12B)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::DL)
+		.addReg(X86::AL);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL)
+		.addImm(2);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(Src64);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+		.addReg(rax)
+		.addReg(X86::R12);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL)
+		.addReg(X86::DL);
+	}
+    }
+
+    // recombine terms
+    {
+	// 4th term in rdx
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rdx)
+		.addReg(rax);
+	}
+
+	// 1st term in rax
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rax)
+		.addReg(X86::R13);
+	}
+
+	// safely add 3rd term
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Src64);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11)
+		.addImm(0);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHLD64rri8))
+		.addReg(X86::R11, RegState::Define)
+		.addReg(X86::R11, RegState::Define)
+		.addReg(Src64)
+		.addImm(32);
+	    
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Src32)
+		.addReg(Src32);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+		.addReg(Src64)
+		.addImm(1ull << 31ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+		.addReg(Src64)
+		.addImm(1ull << 31ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64)
+		.addReg(Src64)
+		.addImm(32);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+		.addReg(X86::AL);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), rax)
+		.addReg(rax)
+		.addReg(Src64);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), rdx)
+		.addReg(rdx)
+		.addReg(X86::R11);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL)
+		.addReg(X86::R12B);
+	}
+
+	// safely add top 32 bits to RAX
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Src64);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11)
+		.addImm(0);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHLD64rri8))
+		.addReg(X86::R11, RegState::Define)
+		.addReg(X86::R11, RegState::Define)
+		.addReg(Src64)
+		.addImm(32);
+	    
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Src32)
+		.addReg(Src32);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+		.addReg(Src64)
+		.addImm(1ull << 31ull);
+	    
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Src64)
+		.addReg(Src64)
+		.addImm(1ull << 31ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64)
+		.addReg(Src64)
+		.addImm(32);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+		.addReg(X86::AL);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), rax)
+		.addReg(rax)
+		.addReg(Src64);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), rdx)
+		.addReg(rdx)
+		.addReg(X86::R11);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL)
+		.addReg(X86::R12B);
+	}
+    }
+
+    // restore rcx
+    if (ShouldUseRcxAsSrc) {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), X86::RCX);
+    } else {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64)
+	    .addReg(X86::R10);
+    }
+}
+
 void X86_64CompSimpMitigationPass::insertSafeMul32rBefore(MachineInstr *MI) {
+
    MachineBasicBlock *MBB = MI->getParent();
    MachineFunction *MF = MBB->getParent();
    DebugLoc DL = MI->getDebugLoc();
@@ -8548,6 +9107,18 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
+  case X86::MUL64r: {
+      insertSafeMul64rBefore(MI);
+      llvm::errs() << "TODO: add cs stats to MUL64r\n";
+      MI->eraseFromParent();
+      break;
+  }
+  case X86::MUL64m: {
+      insertSafeMul64rBefore(MI);
+      llvm::errs() << "TODO: add cs stats to MUL64m\n";
+      MI->eraseFromParent();
+      break;
+  }
   case X86::CMP64rr: {
     insertSafeCmp64rrBefore(MI);
     updateStats(MI, 77);
@@ -9214,7 +9785,17 @@ static void setupTest(MachineFunction &MF) {
         else if (Op == "MUL32r")
           BuildMI(*MBB, &MI, DL, TII->get(X86::MUL32r))
               .addReg(X86::ESI);
-        else if (Op == "CMP64rr")
+	else if (Op == "MUL64r") {
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::MUL64r))
+		.addReg(X86::RSI);
+	} else if (Op == "MUL64m") {
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::MUL64m))
+		.addReg(X86::RCX)
+		.addImm(1)
+		.addReg(0)
+		.addImm(0)
+		.addReg(0);
+	} else if (Op == "CMP64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64rr))
               .addReg(X86::RSI)
               .addReg(X86::RDX);
