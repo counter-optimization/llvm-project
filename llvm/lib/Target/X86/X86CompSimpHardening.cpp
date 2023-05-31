@@ -6448,6 +6448,8 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64ri8Before(MachineInstr *MI) {
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Dest8).addImm(1);
 
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CLC));
+
   BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), Dest64)
     .addReg(Dest64)
     .addReg(Scratch1_64);
