@@ -10136,23 +10136,23 @@ static void setupTest(MachineFunction &MF) {
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::RAX)
 	    .addReg(X86::R15);
 
-	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::R15)
-	      .addReg(X86::RDI);
+	  // BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::R15)
+	  //     .addReg(X86::RDI);
 
-	  BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri32), X86::R15)
-	      .addReg(X86::R15)
-	      .addImm(0x88ull);
+	  // BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri32), X86::R15)
+	  //     .addReg(X86::R15)
+	  //     .addImm(0x88ull);
 
-	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
-	      .addReg(X86::RDI)
-	      .addImm(1)
-	      .addReg(0)
-	      .addImm(0x88ull)
-	      .addReg(0)
-	      .addReg(X86::XMM0);
-	  // store vector regs into outstate struct
+	  // BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	  //     .addReg(X86::RDI)
+	  //     .addImm(1)
+	  //     .addReg(0)
+	  //     .addImm(0x88ull)
+	  //     .addReg(0)
+	  //     .addReg(X86::XMM0);
+	  // // store vector regs into outstate struct
 	  
-	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R15);
+	  // BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R15);
 	}
       }
     }
