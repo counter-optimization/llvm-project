@@ -2118,7 +2118,26 @@ X86_64CompSimpMitigationPass::insertSafePADDDrrBefore(MachineInstr* MI)
     // definitely SSE2 since MMX reg PADDD has its own MIR opcode:
     // X86::MMX_PADDDrr
     MCRegister Dst128 = MI->getOperand(1).getReg().asMCReg();
-    MCRegister Src128 = MI->getOperand(2).getReg().asMCReg();
+    MCRegister Src128;
+    
+    if (X86::PADDDrm == MI->getOpcode()) {
+	auto Base = MI->getOperand(2);
+	auto Scale = MI->getOperand(3);
+	auto Index = MI->getOperand(4);
+	auto Offset = MI->getOperand(5);
+	auto Segment = MI->getOperand(6);
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQUrm), X86::XMM14)
+	    .add(Base)
+	    .add(Scale)
+	    .add(Index)
+	    .add(Offset)
+	    .add(Segment);
+	Src128 = X86::XMM14;
+    } else {
+	assert(X86::PADDDrr == MI->getOpcode());
+	Src128 = MI->getOperand(2).getReg().asMCReg();
+    }
+    
 
     // // save flags
     // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R13)
@@ -9406,10 +9425,16 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     //  }
   case X86::PADDDrr: {
       insertSafePADDDrrBefore(MI);
-      llvm::errs() << "TODO: add cs stats for PADDD\n";
+      llvm::errs() << "TODO: add cs stats for PADDDrr\n";
       MI->eraseFromParent();
       break;
-      
+  }
+  case X86::PADDDrm: {
+      // yes, same func call
+      insertSafePADDDrrBefore(MI);
+      llvm::errs() << "TODO: add cs stats for PADDDrm\n";
+      MI->eraseFromParent();
+      break;
   }
   // case X86::PADDQrr: {
   //      insertSafeVPAddQrrBefore(MI);
@@ -9966,6 +9991,15 @@ static void setupTest(MachineFunction &MF) {
 		.addReg(X86::XMM0)
 		.addReg(X86::XMM1);
         }
+	else if (Op == "PADDDrm") {
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::PADDDrm), X86::XMM0)
+		.addReg(X86::XMM0)
+		.addReg(X86::RDX)
+		.addImm(1)
+		.addReg(0)
+		.addImm(0)
+		.addReg(0);
+        }
 
 
 	/* insert restores of r12-15. pushed r12, r13, r14, 15 */
@@ -10135,26 +10169,72 @@ static void setupTest(MachineFunction &MF) {
 	      .addReg(X86::AL);
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::RAX)
 	    .addReg(X86::R15);
-
-	  
-
-	  // BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::R15)
-	  //     .addReg(X86::RDI);
-
-	  // BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri32), X86::R15)
-	  //     .addReg(X86::R15)
-	  //     .addImm(0x88ull);
-
-	  // BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
-	  //     .addReg(X86::RDI)
-	  //     .addImm(1)
-	  //     .addReg(0)
-	  //     .addImm(0x88ull)
-	  //     .addReg(0)
-	  //     .addReg(X86::XMM0);
-	  // // store vector regs into outstate struct
-	  
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R15);
+
+	  // store vector regs into outstate struct
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0x90ull)
+	      .addReg(0)
+	      .addReg(X86::XMM0);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0xA0ull)
+	      .addReg(0)
+	      .addReg(X86::XMM1);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0xB0ull)
+	      .addReg(0)
+	      .addReg(X86::XMM2);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0xC0ull)
+	      .addReg(0)
+	      .addReg(X86::XMM3);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0xD0ull)
+	      .addReg(0)
+	      .addReg(X86::XMM4);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0xE0ull)
+	      .addReg(0)
+	      .addReg(X86::XMM5);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0xF0ull)
+	      .addReg(0)
+	      .addReg(X86::XMM6);
+
+	  BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0x100ull)
+	      .addReg(0)
+	      .addReg(X86::XMM7);
 	}
       }
     }
