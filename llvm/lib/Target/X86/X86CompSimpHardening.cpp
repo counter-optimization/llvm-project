@@ -2141,163 +2141,202 @@ X86_64CompSimpMitigationPass::insertSafePADDQBefore(MachineInstr* MI)
 
     int NumLanes = 128 / 64;
     for (int LaneIdx = 0; LaneIdx < NumLanes; ++LaneIdx) {
-	// put dst 64 sub lane into r10
-	// {
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R10)
-	// 	.addImm(1ull << 33ull);
+	// r10 := $dst:[63+64*LaneIdx : 64*LaneIdx]
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R10D)
+		.addImm(1ull << 16ull);
 
-	//     // should not clear upper DWORD of R10 (2**33 is there)
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R10D)
-	// 	.addReg(Dst128)
-	// 	.addImm(4 * LaneIdx + 3);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R10W)
+		.addReg(Dst128)
+		.addImm(3 + 4 * LaneIdx);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
-	// 	.addReg(X86::R10)
-	// 	.addImm(16);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
+		.addReg(X86::R10)
+		.addImm(16);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R12)
-	// 	.addImm(0);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11W)
+		.addReg(Dst128)
+		.addImm(2 + 4 * LaneIdx);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), X86::R12)
-	// 	.addReg(X86::R12)
-	// 	.addImm(1ull << 31ull);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+		.addReg(X86::R11W);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), X86::R12)
-	// 	.addReg(X86::R12)
-	// 	.addImm(1ull << 31ull);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
+		.addReg(X86::R10)
+		.addImm(16);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R10)
-	// 	.addReg(X86::R10)
-	// 	.addReg(X86::R12);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11W)
+		.addReg(Dst128)
+		.addImm(1 + 4 * LaneIdx);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
-	// 	.addImm(1ull << 33ull);
-	    
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11D)
-	// 	.addReg(Dst128)
-	// 	.addImm(4 * LaneIdx + 2);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+		.addReg(X86::R11W);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10)
-	// 	.addReg(X86::R10)
-	// 	.addReg(X86::R11);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
+		.addReg(X86::R10)
+		.addImm(16);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
-	// 	.addReg(X86::R10)
-	// 	.addImm(16);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11W)
+		.addReg(Dst128)
+		.addImm(0 + 4 * LaneIdx);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
-	// 	.addImm(1ull << 63ull);
-	    
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11D)
-	// 	.addReg(Dst128)
-	// 	.addImm(4 * LaneIdx + 1);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+		.addReg(X86::R11W);
+	}
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10)
-	// 	.addReg(X86::R10)
-	// 	.addReg(X86::R11);
+	// r11 := $src:[63+64*LaneIdx : 64*LaneIdx]
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R12D)
+		.addImm(1ull << 16ull);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
-	// 	.addReg(X86::R10)
-	// 	.addImm(16);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R12W)
+		.addReg(Src128)
+		.addImm(3 + 4 * LaneIdx);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
-	// 	.addImm(1ull << 63ull);
-	    
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11D)
-	// 	.addReg(Dst128)
-	// 	.addImm(4 * LaneIdx);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(16);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10)
-	// 	.addReg(X86::R10)
-	// 	.addReg(X86::R11);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R13W)
+		.addReg(Src128)
+		.addImm(2 + 4 * LaneIdx);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R10)
-	// 	.addReg(X86::R10)
-	// 	.addImm(16);
-	// }
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+		.addReg(X86::R13W);
 
-	// // put dst 64 sub lane into r11
-	// {
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
-	// 	.addImm(1ull << 33ull);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(16);
 
-	//     // should not clear upper DWORD of R11 (2**33 is there)
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11D)
-	// 	.addReg(Src128)
-	// 	.addImm(4 * LaneIdx + 3);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R13W)
+		.addReg(Src128)
+		.addImm(1 + 4 * LaneIdx);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R11)
-	// 	.addReg(X86::R11)
-	// 	.addImm(16);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+		.addReg(X86::R13W);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R12)
-	// 	.addImm(0);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(16);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), X86::R12)
-	// 	.addReg(X86::R12)
-	// 	.addImm(1ull << 31ull);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R13W)
+		.addReg(Src128)
+		.addImm(0 + 4 * LaneIdx);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), X86::R12)
-	// 	.addReg(X86::R12)
-	// 	.addImm(1ull << 31ull);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+		.addReg(X86::R13W);
 
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R11)
-	// 	.addReg(X86::R11)
-	// 	.addReg(X86::R12);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
-	// 	.addImm(1ull << 33ull);
-	    
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11D)
-	// 	.addReg(Dst128)
-	// 	.addImm(4 * LaneIdx + 2);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R11)
-	// 	.addReg(X86::R11)
-	// 	.addReg(X86::R11);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R11)
-	// 	.addReg(X86::R11)
-	// 	.addImm(16);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
-	// 	.addImm(1ull << 63ull);
-	    
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11D)
-	// 	.addReg(Dst128)
-	// 	.addImm(4 * LaneIdx + 1);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R11)
-	// 	.addReg(X86::R11)
-	// 	.addReg(X86::R11);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R11)
-	// 	.addReg(X86::R11)
-	// 	.addImm(16);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11)
-	// 	.addImm(1ull << 63ull);
-	    
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::PEXTRWrr), X86::R11D)
-	// 	.addReg(Dst128)
-	// 	.addImm(4 * LaneIdx);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R11)
-	// 	.addReg(X86::R11)
-	// 	.addReg(X86::R11);
-
-	//     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), X86::R11)
-	// 	.addReg(X86::R11)
-	// 	.addImm(16);
-	// }
-	
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11)
+		.addReg(X86::R12);
+		    
+	}
 
 	// do 64 bit CS-safe add
 	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R12D)
+		.addImm(1ull << 16ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R13D)
+		.addImm(1ull << 16ull);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+		.addReg(X86::R10W);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R13W)
+		.addReg(X86::R11W);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::R10W)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::R11W)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R13)
+		.addReg(X86::R13)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R10)
+		.addReg(X86::R10)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R11)
+		.addReg(X86::R11)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ADD32rr), X86::R12D)
+		.addReg(X86::R12D)
+		.addReg(X86::R13D);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), X86::R10)
+		.addReg(X86::R10)
+		.addReg(X86::R11);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R13)
+		.addReg(X86::R13)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R11)
+		.addReg(X86::R11)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R12)
+		.addReg(X86::R12)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::RCL64ri), X86::R10)
+		.addReg(X86::R10)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+		.addReg(X86::R12W);
+	}
+
+	// store 64-bit add result in a scratch vector register
+	{
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PINSRWrr), X86::XMM15)
+		.addReg(X86::XMM15)
+		.addReg(X86::R10D)
+		.addImm(0 + 4 * LaneIdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::R10W)
+		.addImm(1);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R10)
+		.addReg(X86::R10)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PINSRWrr), X86::XMM15)
+		.addReg(X86::XMM15)
+		.addReg(X86::R10D)
+		.addImm(1 + 4 * LaneIdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R10)
+		.addReg(X86::R10)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PINSRWrr), X86::XMM15)
+		.addReg(X86::XMM15)
+		.addReg(X86::R10D)
+		.addImm(2 + 4 * LaneIdx);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R10)
+		.addReg(X86::R10)
+		.addImm(16);
+
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::PINSRWrr), X86::XMM15)
+		.addReg(X86::XMM15)
+		.addReg(X86::R10D)
+		.addImm(3 + 4 * LaneIdx);
 	}
     }
 
     // load dst128 with scratch128
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOVDQArr), Dst128)
+	.addReg(X86::XMM15);
 }
 
 // SSE2
@@ -9638,12 +9677,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
       MI->eraseFromParent();
       break;
   }
-    //  case X86::PADDQrm: {
-    //    insertSafeVPAddQrmBefore(MI);
-    //    updateStats(MI, 105);
-    //    MI->eraseFromParent();
-    //    break;
-    //  }
+  case X86::PADDQrm: {
+      insertSafePADDQBefore(MI);
+      updateStats(MI, 105);
+      MI->eraseFromParent();
+      break;
+  }
     //  case X86::VPANDrr: {
     //    insertSafeVPAndrrBefore(MI);
     //    updateStats(MI, 106);
