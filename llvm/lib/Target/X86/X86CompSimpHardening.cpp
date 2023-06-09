@@ -2785,6 +2785,7 @@ void X86_64CompSimpMitigationPass::insertSafeShl64riBefore(MachineInstr *MI) {
   auto &MRI = MF->getRegInfo();
 
   MCRegister Dst64 = MI->getOperand(1).getReg().asMCReg();
+  MCRegister Dst16 = TRI->getSubReg(Dst64, X86::sub_16bit);
   MCRegister Dst8 = TRI->getSubReg(Dst64, X86::sub_8bit);
   int64_t Imm = MI->getOperand(2).getImm();
 
@@ -2795,11 +2796,11 @@ void X86_64CompSimpMitigationPass::insertSafeShl64riBefore(MachineInstr *MI) {
   auto r12 = X86::R12;
   
   // mask to select only the bottom 6 bits: 0x3F as uint64_t
-  int64_t FinalShiftAmmount = static_cast<uint64_t>(Imm) % 0x3FULL;
+  int64_t FinalShiftAmount = static_cast<uint64_t>(Imm) % 64;
 
   // this doesn't work with an imm of 0. hopefully -O2 doesn't
   // use these.
-  assert(0 != FinalShiftAmmount);
+  assert(0 != FinalShiftAmount);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), r10)
     .addImm(1ULL << 63ULL); // 2 ** 63
@@ -2807,23 +2808,39 @@ void X86_64CompSimpMitigationPass::insertSafeShl64riBefore(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), r11)
     .addReg(r10);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), r11b)
-    .addReg(Dst8);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), r11w)
+    .addReg(Dst16);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Dst8)
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Dst16)
     .addImm(1);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), r11)
-    .addReg(r11)
-    .addImm(FinalShiftAmmount);
+  // shift order changes when shift amt > 48, to set CF correctly
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Dst64)
-    .addReg(Dst64)
-    .addImm(FinalShiftAmmount);
+  if (FinalShiftAmount <= 48) {
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), r11)
+        .addReg(r11)
+        .addImm(Imm);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Dst64)
+        .addReg(Dst64)
+        .addImm(Imm);
+
+  } else {
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Dst64)
+        .addReg(Dst64)
+        .addImm(Imm);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), r11)
+        .addReg(r11)
+        .addImm(Imm);
+  }
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SETCCr), X86::R12B)
+	.addImm(X86::CondCode::COND_B);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), r10)
     .addReg(r10)
-    .addImm(FinalShiftAmmount);
+    .addImm(Imm);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), r11)
     .addReg(r11)
@@ -2836,6 +2853,9 @@ void X86_64CompSimpMitigationPass::insertSafeShl64riBefore(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Dst64)
     .addReg(Dst64)
     .addReg(r10);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8), X86::R12)
+    .addImm(0);
 }
 
 void
