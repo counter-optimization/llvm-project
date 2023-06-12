@@ -45,6 +45,11 @@ static cl::opt<bool> EnableCompSimpDynStat(
     cl::desc("Enable the X86 comp simp dynamic instrumentation count."),
     cl::init(false));
 
+static cl::opt<bool> RecordTestCycleCounts(
+    "x86-cs-test-cycle-counts",
+    cl::desc("If testing x86 CS,SS passes, also record cycle counts."),
+    cl::init(false));
+
 namespace {
 class X86_64CompSimpMitigationPass : public MachineFunctionPass {
 public:
@@ -9818,6 +9823,30 @@ static void setupTest(MachineFunction &MF) {
 	    .addReg(X86::R15);
 	}
 
+	// record cycle counts
+	if (RecordTestCycleCounts)
+	{
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+		.addReg(X86::RAX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+		.addReg(X86::RDX);
+	    
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::CPUID));
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::RDTSC));
+
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RDX);
+
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0x110ull)
+	      .addReg(0)
+	      .addReg(X86::RAX);
+
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RAX);
+	}
+
 	if (Op == "LEA64r") {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::LEA64r), X86::RSI)
 		.addReg(X86::RDX) // base
@@ -10301,6 +10330,40 @@ static void setupTest(MachineFunction &MF) {
 		.addImm(0)
 		.addReg(0);
         }
+
+	if (RecordTestCycleCounts)
+	{
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+		.addReg(X86::RAX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+		.addReg(X86::RDX);
+	    
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::RDTSCP));
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::CPUID));
+
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rm))
+		.addReg(X86::R10)
+		.addReg(X86::RDI)
+		.addImm(1)
+		.addReg(0)
+		.addImm(0x110ull)
+		.addReg(0);
+
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::SUB64rr), X86::R10D)
+		.addReg(X86::R10D)
+		.addReg(X86::EAX);
+
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+	      .addReg(X86::RDI)
+	      .addImm(1)
+	      .addReg(0)
+	      .addImm(0x110ull)
+	      .addReg(0)
+	      .addReg(X86::R10);
+
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RDX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RAX);
+	}
 
 
 	/* insert restores of r12-15. pushed r12, r13, r14, 15 */
