@@ -4459,6 +4459,10 @@ void X86_64CompSimpMitigationPass::insertSafeOr64Before(MachineInstr *MI) {
       .addReg(X86::R12);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1_16).addReg(X86::R11W);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2_16).addReg(X86::R12W);
+
+  // Correctly set ZF and clear CF
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CMP64ri8), Op1).addImm(0);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CLC));
 }
 
 void X86_64CompSimpMitigationPass::insertSafeOr32ri8Before(MachineInstr *MI) {
