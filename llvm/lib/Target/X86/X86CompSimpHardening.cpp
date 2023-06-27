@@ -9527,11 +9527,6 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   ///   updateStats(MI, 72); MI->eraseFromParent();
   ///   break;
   /// }
-  ///// case X86::SHR32rCL: {
-  /////   insertSafeShr32Before(MI);
-  /////   updateStats(MI, 73); MI->eraseFromParent();
-  /////   break;
-  ///// }
   ///// case X86::SHR8rCL: {
   ///// assert(false && "support shr8cl");
   ///// updateStats(MI, 75); MI->eraseFromParent();
@@ -9608,12 +9603,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   ///    MI->eraseFromParent();
   ///    break;
   ///  }
-  /// case X86::IMUL32rr: {
-  ///   insertSafeIMul32rrBefore(MI);
-  ///   updateStats(MI, 84);
-  ///   MI->eraseFromParent();
-  ///   break;
-  /// }
+  case X86::IMUL32rr: {
+    insertSafeIMul32rrBefore(MI);
+    updateStats(MI, 84);
+    MI->eraseFromParent();
+    break;
+  }
   case X86::IMUL32rm: {
     insertSafeIMul32rmBefore(MI);
     updateStats(MI, 85);
