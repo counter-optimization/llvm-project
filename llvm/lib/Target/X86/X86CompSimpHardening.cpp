@@ -5415,22 +5415,35 @@ void X86_64CompSimpMitigationPass::insertSafeIMul32rrBefore(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand &MOp0 = MI->getOperand(0);
-  Register Op1 = MI->getOperand(1).getReg();
-  Register Op2 = MI->getOperand(2).getReg();
-  Register Op1_64 =
-      TRI->getMatchingSuperReg(Op1, X86::sub_32bit, &X86::GR64RegClass);
+  auto Dest32 = MI->getOperand(1).getReg();
+  auto Src32 = MI->getOperand(2).getReg();
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(Op1_64);
+  auto Dest64 = TRI->getMatchingSuperReg(Dest32, X86::sub_32bit, &X86::GR64RegClass);
+  auto Src64 = TRI->getMatchingSuperReg(Src32, X86::sub_32bit, &X86::GR64RegClass);
 
-  // MUL32rr MOp1
-  auto Mul = BuildMI(*MBB, *MI, DL, TII->get(X86::MUL32r)).addReg(Op2);
-  insertSafeMul32rBefore(&*Mul);
-  Mul->eraseFromParent();
+  auto Scratch1_64 = X86::R11;
+  auto Scratch2_64 = X86::R10;
+  auto Scratch2_32 = X86::R10D;
 
-  // Move EAX into MOp0
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), MOp0.getReg())
-      .addReg(X86::EAX);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 63ULL);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Scratch2_32).addReg(Src32);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Scratch2_64)
+    .addReg(Scratch2_64)
+    .addReg(Scratch1_64);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32).addReg(Dest32);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Dest64)
+    .addReg(Dest64)
+    .addReg(Scratch1_64);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64rr), Dest64)
+    .addReg(Dest64)
+    .addReg(Scratch2_64);
+  
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32).addReg(Dest32);
 }
 
 void
