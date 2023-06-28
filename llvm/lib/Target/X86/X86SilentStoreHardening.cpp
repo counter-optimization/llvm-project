@@ -413,9 +413,9 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R12B)
 	      .addReg(X86::R12B);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::OR8rr), X86::R11B)
-	      .addReg(X86::R11B)
-	      .addReg(X86::R12B);
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), X86::R11D)
+	      .addReg(X86::R11D)
+	      .addReg(X86::R12D);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
 	      .add(Base)
@@ -606,9 +606,9 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       // combine the low 4 bit nibble, high 4 bit nibble into
       // the final blinding value that is != Src8 and != memory content
       {
-	  BuildMI(MBB, MI, DL, TII->get(X86::OR8rr), X86::R10B)
-	      .addReg(X86::R10B)
-	      .addReg(X86::R11B);
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addReg(X86::R11D);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
 	      .add(Base)
@@ -914,9 +914,9 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
 	      .addReg(X86::R11B);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::OR8rr), X86::R10B)
-	      .addReg(X86::R10B)
-	      .addReg(X86::R11B);
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addReg(X86::R11D);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
 	      .add(BaseRegMO)

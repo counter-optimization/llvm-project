@@ -9453,12 +9453,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   //   MI->eraseFromParent();
   //   break;
   // }
-  case X86::ADD64mr: {
-    insertSafeAdd64mrBefore(MI);
-    updateStats(MI, 5);
-    MI->eraseFromParent();
-    break;
-  }
+  // case X86::ADD64mr: {
+  //   insertSafeAdd64mrBefore(MI);
+  //   updateStats(MI, 5);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
   case X86::ADD64rm: {
     insertSafeAdd64rmBefore(MI);
     updateStats(MI, 6);
