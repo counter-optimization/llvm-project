@@ -1160,15 +1160,47 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .add(OffsetMO)
 	  .add(SegmentMO);
 
-      int32_t Imm = static_cast<int32_t>(SrcMO.getImm());
-      Imm = ~Imm + 1;
+      // Perform comp simp transform, sets CF
+      
+      int8_t Imm = static_cast<int8_t>(SrcMO.getImm());
 
       BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R11)
-	  .addReg(X86::R12);
+	    .addReg(X86::R12);
 
-      BuildMI(MBB, MI, DL, TII->get(X86::SUB32ri), X86::R11D)
-	  .addReg(X86::R11D)
-	  .addImm(Imm);
+      MCRegister Dest32 = X86::R11D;
+      MCRegister Dest64 = X86::R11;
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Dest32)
+        .addReg(Dest32);       
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+        .addImm(1ULL << 33ULL);
+        
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), Dest64)
+        .addReg(Dest64)
+        .addReg(X86::R10);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri32), X86::R10)
+        .addImm(0);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::ADD32ri8), X86::R10)
+        .addReg(X86::R10)
+        .addImm(Imm);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::ADD64rr), Dest64)
+        .addReg(Dest64)
+        .addReg(X86::R10);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::CMP32ri8), Dest32)
+        .addImm(0);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::BT64ri8), Dest64)
+        .addImm(32);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Dest32)
+        .addReg(Dest32);
+
+      // Perform blinding store
 
       BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
 	  .addReg(X86::R11B);
