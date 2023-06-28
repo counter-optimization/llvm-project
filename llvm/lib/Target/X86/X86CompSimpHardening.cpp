@@ -8210,6 +8210,9 @@ void X86_64CompSimpMitigationPass::insertSafeAdd32ri8Before(MachineInstr *MI) {
     .addReg(Dest64)
     .addReg(X86::R11);
 
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CMP32ri8), Dest32)
+    .addImm(0);
+
   BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8), Dest64)
     .addImm(32);
 
