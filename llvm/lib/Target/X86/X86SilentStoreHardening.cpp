@@ -1237,6 +1237,94 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     Remove.push_back(&MI);
 
     BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
+      .addReg(X86::R11)
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO);
+
+    // Perform comp simp transform, sets CF
+
+    int64_t Imm = SrcMO.getImm();
+
+    auto Dest64 = X86::R11;
+    auto Dest16 = X86::R11;
+
+    auto Src64 = X86::R10;
+    auto Src16 = X86::R10W;
+    auto Src8 = X86::R10B;
+
+    auto Scratch1_64 = X86::R12;
+    auto Scratch1_32 = X86::R12D;
+    auto Scratch1_16 = X86::R12W;
+
+    auto Scratch2_64 = X86::R13;
+    auto Scratch2_32 = X86::R13D;
+    auto Scratch2_16 = X86::R13W;
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), Src64).addImm(0);
+    BuildMI(MBB, MI, DL, TII->get(X86::ADD64ri32), Src64)
+        .addReg(Src64)
+        .addImm(Imm);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 48ULL);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Scratch1_16).addReg(Dest16);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Dest16).addImm(1);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), Scratch2_64).addImm(1ULL << 48ULL);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Scratch2_16).addReg(Src16);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Src16).addImm(1);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Scratch1_64)
+        .addReg(Scratch1_64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Scratch2_64)
+        .addReg(Scratch2_64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Dest64)
+        .addReg(Dest64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Src64)
+        .addReg(Src64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ADD32rr), X86::R11D)
+        .addReg(Scratch1_32)
+        .addReg(Scratch2_32);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ADC64rr), Dest64)
+        .addReg(Dest64)
+        .addReg(Src64);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Scratch2_64)
+        .addReg(Scratch2_64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Src64)
+        .addReg(Src64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Scratch1_64)
+        .addReg(Scratch1_64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::RCL64ri), Dest64)
+        .addReg(Dest64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Dest16).addReg(Scratch1_16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::SETCCr), Src8).addImm(2);
+    BuildMI(MBB, MI, DL, TII->get(X86::CMP64ri8), Dest64).addImm(0x0);
+    BuildMI(MBB, MI, DL, TII->get(X86::BT64ri8), Src8).addImm(0x0);
+
+    // Reload memory contents into R12
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
       .addReg(X86::R12)
       .add(BaseRegMO)
       .add(ScaleMO)
@@ -1244,16 +1332,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       .add(OffsetMO)
       .add(SegmentMO);
 
-    int64_t Imm = SrcMO.getImm();
-    Imm = ~Imm + 1;
-    // int64_t Imm = 46464;
-
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R11)
-      .addReg(X86::R12);
-
-    BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R11)
-      .addReg(X86::R11)
-      .addImm(Imm);
+    // Perform blinding store
 
     BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
       .addReg(X86::R11B);
