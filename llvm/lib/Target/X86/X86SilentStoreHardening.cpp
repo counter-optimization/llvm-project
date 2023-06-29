@@ -796,9 +796,8 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       auto &IndexMO = MI.getOperand(2);
       auto &OffsetMO = MI.getOperand(3);
       auto &SegmentMO = MI.getOperand(4);
-      
-      int32_t Imm = static_cast<int32_t>(MI.getOperand(5).getImm());
-      Imm = ~Imm + 1;
+
+      auto Imm = MI.getOperand(5).getImm();
 
       BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
 	  .add(BaseRegMO)
@@ -807,12 +806,21 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .add(OffsetMO)
 	  .add(SegmentMO);
 
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R12)
+	  .addImm(0);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R12)
+	  .addImm(Imm);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOVSX64rr8), X86::R12)
+	  .addReg(X86::R12B);
+      BuildMI(MBB, MI, DL, TII->get(X86::NEG64r), X86::R12)
+	  .addReg(X86::R12);
+
       BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R11)
 	  .addReg(X86::R10);
 
-      BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R11)
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), X86::R11)
 	  .addReg(X86::R11)
-	  .addImm(Imm);
+	  .addReg(X86::R12);
 
       BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
 	  .addReg(X86::R11B);
@@ -2887,7 +2895,7 @@ static void setupTest(MachineFunction &MF) {
 			    .addReg(0)
 			    .addImm(0)
 			    .addReg(0)
-			    .addImm(0xFFULL);
+			    .addImm(0xFFull);
 		    }
 
 		    else if (Op == "ADD32mi8") {
