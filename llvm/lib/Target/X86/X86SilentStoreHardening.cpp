@@ -1074,7 +1074,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       MCRegister Src32 = MI.getOperand(5).getReg().asMCReg();
 
       // load the memory contents
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12D)
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R12D)
 	  .add(BaseRegMO)
 	  .add(ScaleMO)
 	  .add(IndexMO)
