@@ -4012,12 +4012,12 @@ void X86_64CompSimpMitigationPass::insertSafeXor64rmBefore(MachineInstr *MI) {
   auto Op1_16 = TRI->getSubReg(Op1, 4);
   auto Op2_16 = TRI->getSubReg(Op2, 4);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(pow(2, 16));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(1ull << 17ull);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W).addReg(Op1_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op1_16).addImm(0xFFFF);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op1_16).addImm(1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(1ull << 17ull);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W).addReg(Op2_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op2_16).addImm(0xFFFF);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op2_16).addImm(1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), Op1).addReg(Op1).addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10)
       .addReg(X86::R10)
@@ -4064,12 +4064,12 @@ void X86_64CompSimpMitigationPass::insertSafeXor64Before(MachineInstr *MI) {
   auto Op1_16 = TRI->getSubReg(Op1, 4);
   auto Op2_16 = TRI->getSubReg(Op2, 4);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(pow(2, 16));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(1ull << 17ull);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W).addReg(Op1_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op1_16).addImm(0xFFFF);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op1_16).addImm(1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(1ull << 17ull);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W).addReg(Op2_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op2_16).addImm(0xFFFF);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op2_16).addImm(1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), Op1).addReg(Op1).addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10)
       .addReg(X86::R10)
@@ -9678,12 +9678,13 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-  case X86::XOR64mr: {
-    insertSafeXor64mrBefore(MI);
-    updateStats(MI, 36);
-    MI->eraseFromParent();
-    break;
-  }
+  // handled in silent stores transform like all merged SS+CS transforms for now
+  // case X86::XOR64mr: {
+  //   insertSafeXor64mrBefore(MI);
+  //   updateStats(MI, 36);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
   case X86::XOR32rr: {
     insertSafeXor32Before(MI);
     updateStats(MI, 37);

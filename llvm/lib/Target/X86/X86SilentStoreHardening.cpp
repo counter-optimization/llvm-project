@@ -1088,21 +1088,24 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), X86::R10D)
 	      .addReg(Src32);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R12)
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R13)
+	      .addImm(1ull << 33ull);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), X86::R12)
 	      .addReg(X86::R12)
-	      .addImm(1ULL << 31ULL);
+	      .addReg(X86::R13);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R12)
-	      .addReg(X86::R12)
-	      .addImm(1ULL << 31ULL);
+	  // BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R12)
+	  //     .addReg(X86::R12)
+	  //     .addImm(X86::R13);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R10)
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), X86::R10)
 	      .addReg(X86::R10)
-	      .addImm(1ULL << 31ULL);
+	      .addReg(X86::R13);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R10)
-	      .addReg(X86::R10)
-	      .addImm(1ULL << 31ULL);
+	  // BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R10)
+	  //     .addReg(X86::R10)
+	  //     .addImm(1ULL << 31ULL);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::ADD64rr), X86::R12)
 	      .addReg(X86::R12)
@@ -2879,7 +2882,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "ADD64mi8") {
 			changedOpcode = X86::ADD64mi8;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mi8), X86::RSI)
+			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi8), X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
