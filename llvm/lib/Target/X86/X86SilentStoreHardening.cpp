@@ -3107,7 +3107,10 @@ static void setupTest(MachineFunction &MF) {
 			.addImm(0x78) // offset
 			.addReg(0) // segment reg (none)
 			.addReg(X86::R15);
-		    
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r), X86::R10);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r), X86::R11);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r), X86::R12);
 		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r), X86::R15);   
 		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::R15)
 			.addReg(X86::RAX);
@@ -3125,6 +3128,9 @@ static void setupTest(MachineFunction &MF) {
 		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::RAX)
 			.addReg(X86::R15);
 		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R15);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R12);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R11);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R10);
 		}
 	    }
 	}
