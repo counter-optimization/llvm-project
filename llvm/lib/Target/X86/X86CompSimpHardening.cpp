@@ -4328,20 +4328,22 @@ void X86_64CompSimpMitigationPass::insertSafeOr64ri8Before(MachineInstr *MI) {
 
   assert(MOp1.isReg() && "Op1 is a reg");
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R13).add(MOp2);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::R13).add(MOp2);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOVSX64rr8), X86::R13)
+      .addReg(X86::R13B);
 
   auto Op1 = MOp1.getReg();
   auto Op2 = X86::R13;
 
-  auto Op1_16 = TRI->getSubReg(Op1, 4);
-  auto Op2_16 = TRI->getSubReg(Op2, 4);
+  auto Op1_16 = TRI->getSubReg(Op1, X86::sub_16bit);
+  auto Op2_16 = TRI->getSubReg(Op2, X86::sub_16bit);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(1ull << 17ull);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W).addReg(Op1_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op1_16).addImm(0xFFFF);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R12).addImm(pow(2, 16));
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op1_16).addImm(1);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R12).addImm(1ull << 17ull);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W).addReg(Op2_16);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op2_16).addImm(0xFFFF);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op2_16).addImm(1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), Op1).addReg(Op1).addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R11)
       .addReg(X86::R11)
