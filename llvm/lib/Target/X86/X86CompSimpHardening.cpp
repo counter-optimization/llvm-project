@@ -4595,39 +4595,36 @@ void X86_64CompSimpMitigationPass::insertSafeTest32Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(0);
-  MachineOperand MOp2 = MI->getOperand(1);
+  auto Dst32 = MI->getOperand(0).getReg().asMCReg();
+  auto Src32 = MI->getOperand(1).getReg().asMCReg();
 
-  assert(MOp1.isReg() && "Op1 is a reg");
-  assert(MOp2.isReg() && "Op2 is a reg");
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R12)
+      .addImm(1ull << 33ull);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10D)
+      .addReg(Dst32);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R11D)
+      .addReg(Src32);
 
-  // Move MOp1 to R10 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(MOp1.getReg());
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R10)
+      .addReg(X86::R10)
+      .addReg(X86::R12);
 
-  // Move MOp2 to R13
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R13).addReg(MOp2.getReg());
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R11)
+      .addReg(X86::R11)
+      .addReg(X86::R12);
 
-  auto Op1 = X86::R10;
-  auto Op2 = X86::R13;
+  BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10)
+      .addReg(X86::R10)
+      .addReg(X86::R11);
 
-  auto Op2_64 =
-      TRI->getMatchingSuperReg(Op2, X86::sub_32bit, &X86::GR64RegClass);
-  auto Op1_64 =
-      TRI->getMatchingSuperReg(Op1, X86::sub_32bit, &X86::GR64RegClass);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10D)
+      .addReg(X86::R10D);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11).addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op1).addReg(Op1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op2).addReg(Op2);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R12).addImm(pow(2, 33));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R12)
-      .addReg(X86::R12)
-      .addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), X86::R12)
-      .addReg(X86::R12)
-      .addReg(Op1_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::TEST64rr)).addReg(Op1_64).addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op1).addReg(Op1);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R11);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CMP32ri), X86::R10D)
+      .addImm(0);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CLC));
+  
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAnd32Before(MachineInstr *MI) {
