@@ -5510,12 +5510,12 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
     .addReg(Dest64)
     .addReg(Src64);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SHL8ri), Src64)
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64)
     .addReg(Src64)
     .addImm(63);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8).addImm(1);
 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::SHL8ri), Scratch4_64)
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Scratch4_64)
     .addReg(Scratch4_64)
     .addImm(63);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Scratch4_8).addImm(1);
@@ -10414,6 +10414,10 @@ static void setupTest(MachineFunction &MF) {
               .addReg(0)
               .addImm(0)
               .addReg(0);
+        else if (Op == "IMUL64rr")
+          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rr), X86::RSI)
+              .addReg(X86::RSI)
+              .addReg(X86::RDX);
         else if (Op == "XOR64rr")
           BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64rr), X86::RSI)
               .addReg(X86::RSI)
