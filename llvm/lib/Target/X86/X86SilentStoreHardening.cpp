@@ -536,6 +536,8 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   case X86::MOV8mr_NOREX:
   case X86::MOV8mr:
   case X86::MOV8mi: {
+      Remove.push_back(&MI);
+      
       MachineOperand& Base = MI.getOperand(0);
       MachineOperand& Scale = MI.getOperand(1);
       MachineOperand& Idx = MI.getOperand(2);
@@ -545,7 +547,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       // An immediate or a register, so keep as MachineOperand
       MachineOperand& Src8 = MI.getOperand(5);
 
-      uint64_t TwoToThirtyOne = 1ULL << 31ULL;
+      uint64_t TwoToThirtyOne = 1ull << 31ull;
 
       // Save flags
       // save them into R12 while preserving RAX (since LAHF writes
@@ -577,10 +579,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R10D)
 	      .addReg(X86::R10D)
-	      .addImm(TwoToThirtyOne | (0xF0ULL)); // (2**31) & 0xF0
-
-	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
-	      .addReg(X86::R10B);
+	      .addImm(TwoToThirtyOne | (0xF0ull)); // (2**31) & 0xF0
       }
 
       // Load the 8-bit value we want to store to the memory address
@@ -597,10 +596,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
 	      .addReg(X86::R11D)
-	      .addImm(TwoToThirtyOne | 0x0FULL);
-
-	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
-	      .addReg(X86::R11B);
+	      .addImm(TwoToThirtyOne | 0x0Full);
       }
 
       // combine the low 4 bit nibble, high 4 bit nibble into
@@ -610,6 +606,9 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	      .addReg(X86::R10D)
 	      .addReg(X86::R11D);
 
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	      .addReg(X86::R10B);
+
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
 	      .add(Base)
 	      .add(Scale)
@@ -617,7 +616,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	      .add(Offset)
 	      .add(Segment)
 	      .addReg(X86::R10B);
-	  
+
 	  auto MovOfSrc = Src8.isImm() ? X86::MOV8mi : X86::MOV8mr;
 	  BuildMI(MBB, MI, DL, TII->get(MovOfSrc))
 	      .add(Base)
@@ -2901,15 +2900,12 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "ADD32mi8") {
 			changedOpcode = X86::ADD32mi8;
 
-			int8_t Imm = 1;
-			Imm = Imm << 7;
-
 			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mi8), X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
 			    .addReg(0)
-			    .addImm(Imm);
+			    .addImm(32);
 		    }
 		    else if (Op == "ADD32mr") {
 			changedOpcode = X86::ADD32mr;
