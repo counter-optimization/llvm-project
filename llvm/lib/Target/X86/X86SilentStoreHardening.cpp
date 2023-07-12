@@ -357,6 +357,46 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   bool OpcodeSupported = true;
 
   switch (MI.getOpcode()) {
+  case X86::MOVPDI2DImr: {
+      // Remove.push_back(&MI);
+
+      auto Base = MI.getOperand(0);
+      auto Scale = MI.getOperand(1);
+      auto Idx = MI.getOperand(2);
+      auto Offset = MI.getOperand(3);
+      auto Segment = MI.getOperand(4);
+
+      auto Src128 = MI.getOperand(5).getReg().asMCReg();
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOVPDI2DIrr))
+	  .addReg(X86::R10D)
+	  .addReg(Src128);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm))
+	  .addReg(X86::R11D)
+	  .add(Base)
+	  .add(Scale)
+	  .add(Idx)
+	  .add(Offset)
+	  .add(Segment);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr))
+	  .addReg(X86::R10W)
+	  .addReg(X86::R11W);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT32r), X86::R10D)
+	  .addReg(X86::R10D);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+          .add(Base)
+          .add(Scale)
+          .add(Idx)
+          .add(Offset)
+          .add(Segment)
+          .addReg(X86::R10D);
+      
+      break;
+  }
   case X86::AND8mi: {
       Remove.push_back(&MI);
 
@@ -2961,6 +3001,65 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addImm(137);
+		    }
+		    else if (Op == "MOV16mr") {
+			changedOpcode = X86::MOV16mr;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV16mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DX);
+		    }
+
+		    else if (Op == "MOV16mi") {
+			changedOpcode = X86::MOV16mi;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV16mi))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(1ull << 13ull);
+		    }
+
+		    else if (Op == "MOV32mr") {
+			changedOpcode = X86::MOV32mr;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::EDX);
+		    }
+
+		    else if (Op == "MOV32mi") {
+			changedOpcode = X86::MOV32mi;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mi))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(1ull << 25ull);
+		    }
+
+		    else if (Op == "MOVPDI2DImr") {
+			changedOpcode = X86::MOVPDI2DImr;
+
+			BuildMI(*MBB, &MI, DL, TII->get(X86::MOVPDI2DImr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
 		    }
 		}
 
