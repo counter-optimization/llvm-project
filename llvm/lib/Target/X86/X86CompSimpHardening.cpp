@@ -10040,8 +10040,7 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   case X86::LEA64_32r: 
   case X86::LEA64r: {
     insertSafeLea64rBefore(MI);
-    llvm::errs() << "TODO: ADD CS STATS COLLECTOR FOR LEA64r\n";
-    llvm::errs() << "TODO: ADD CS STATS COLLECTOR FOR LEA64_32r\n";
+    updateStats(MI, MI->getOpcode() == X86::LEA64r ? 114 : 113);
     MI->eraseFromParent();
     break;
   }
@@ -10130,7 +10129,7 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::ADD32ri: {
     insertSafeAdd32riBefore(MI);
-    llvm::errs() << "TODO: insert CS stats collecting for ADD32ri\n";
+    updateStats(MI, 115);
     MI->eraseFromParent();
     break;
   }
@@ -10142,13 +10141,13 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   // }
   case X86::ADD8rm: {
       insertSafeAdd8rmBefore(MI);
-      llvm::errs() << "TODO: compsimp cs statistics for ADD8rm\n";
+      updateStats(MI, 116);
       MI->eraseFromParent();
       break;
   }
   case X86::AND64rm: {
       insertSafeAnd64rmBefore(MI);
-      llvm::errs() << "TODO: compsimp cs statistics for AND64rm\n";
+      updateStats(MI, 117);
       MI->eraseFromParent();
       break;
   }
@@ -10266,7 +10265,7 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::XOR32ri: {
       insertSafeXor32riBefore(MI);
-      llvm::errs() << "TODO: implement cs stats for XOR32ri\n";
+      updateStats(MI, 118);
       MI->eraseFromParent();
       break;
   }
@@ -10314,7 +10313,7 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::AND8ri: {
       insertSafeAnd8riBefore(MI);
-      llvm::errs() << "TODO: CS stats for AND8ri\n";
+      updateStats(MI, 119);
       MI->eraseFromParent();
       break;
   }
@@ -10356,13 +10355,14 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::SAR8ri: {
     insertSafeSar8riBefore(MI);
-    llvm::errs() << "TODO: cs stats for SAR8r1\n";
+    updateStats(MI, 120);
     MI->eraseFromParent();
     break;
   }
   case X86::SHR32rCL: {
     insertSafeShr32rClBefore(MI);
-    updateStats(MI, 53); MI->eraseFromParent();
+    updateStats(MI, 53);
+    MI->eraseFromParent();
     break;
   }
   case X86::SHR32ri: {
@@ -10403,7 +10403,7 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::SHR64r1: {
       insertSafeShr64r1Before(MI);
-      llvm::errs() << "TODO: CS stats counting to SHR64r1\n";
+      updateStats(MI, 121);
       MI->eraseFromParent();
       break;
   }
@@ -10415,7 +10415,8 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::SHL64ri: {
     insertSafeShl64riBefore(MI);
-    updateStats(MI, 61); MI->eraseFromParent();
+    updateStats(MI, 61);
+    MI->eraseFromParent();
     break;
   }
   case X86::AND16rr: {
@@ -10426,13 +10427,13 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::OR8rr: {
       insertSafeOr8Before(MI);
-      updateStats(MI, 63);
+      updateStats(MI, 122);
       MI->eraseFromParent();
       break;
   }
   case X86::OR8ri: {
       insertSafeOr8riBefore(MI);
-      llvm::errs() << "TODO: implement cs stats tracking for OR8ri\n";
+      updateStats(MI, 123);
       MI->eraseFromParent();
       break;
   }
@@ -10463,7 +10464,7 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     ///// }
   case X86::ADD8ri: {
     insertSafeAdd8riBefore(MI);
-    llvm::errs() << "TODO: add CS stats tracking for ADD8ri\n";
+    updateStats(MI, 124);
     MI->eraseFromParent();
     break;
   }
@@ -10490,13 +10491,13 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::MUL64r: {
       insertSafeMul64rBefore(MI);
-      llvm::errs() << "TODO: add cs stats to MUL64r\n";
+      updateStats(MI, 125);
       MI->eraseFromParent();
       break;
   }
   case X86::MUL64m: {
       insertSafeMul64rBefore(MI);
-      llvm::errs() << "TODO: add cs stats to MUL64m\n";
+      updateStats(MI, 32);
       MI->eraseFromParent();
       break;
   }
@@ -10514,7 +10515,7 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::CMP64mr: {
     insertSafeCmp64mrBefore(MI);
-    llvm::errs() << "TODO: CS stats for CMP64mr\n";
+    updateStats(MI, 126);
     MI->eraseFromParent();
     break;
   }
@@ -10710,14 +10711,13 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     //  }
   case X86::PADDDrr: {
       insertSafePADDDrrBefore(MI);
-      llvm::errs() << "TODO: add cs stats for PADDDrr\n";
+      updateStats(MI, 127);
       MI->eraseFromParent();
       break;
   }
   case X86::PADDDrm: {
-      // yes, same func call
       insertSafePADDDrrBefore(MI);
-      llvm::errs() << "TODO: add cs stats for PADDDrm\n";
+      updateStats(MI, 128);
       MI->eraseFromParent();
       break;
   }
