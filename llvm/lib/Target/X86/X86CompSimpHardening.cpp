@@ -11664,7 +11664,6 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
     return false; // Doesn't modify the func if not running
   }
 
-  bool doesModifyFunction{false};
   std::string SubName = MF.getName().str();
   bool SameSymbolNameAlreadyInstrumented =
       FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
@@ -11678,14 +11677,39 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
   }
   FunctionsInstrumented.insert(SubName);
 
+  const auto &STI = MF.getSubtarget();
+  auto *TII = STI.getInstrInfo();
+
+  /* insert R12-R15 push and pops to conform to ABI: these are callee-saved */
+  // auto first_bb = MF.begin();
+  // auto first_mi = first_bb->begin();
+  // auto last_bb = --MF.end();
+  // auto last_mi = --last_bb->end();
+  // /* pushes */
+  // BuildMI(*first_bb, *first_mi, first_mi->getDebugLoc(), TII->get(X86::PUSH64r))
+  //     .addReg(X86::R12);
+  // BuildMI(*first_bb, *first_mi, first_mi->getDebugLoc(), TII->get(X86::PUSH64r))
+  //     .addReg(X86::R13);
+  // BuildMI(*first_bb, *first_mi, first_mi->getDebugLoc(), TII->get(X86::PUSH64r))
+  //     .addReg(X86::R14);
+  // BuildMI(*first_bb, *first_mi, first_mi->getDebugLoc(), TII->get(X86::PUSH64r))
+  //     .addReg(X86::R15);
+  // /* pops */
+  // BuildMI(*last_bb, *last_mi, last_mi->getDebugLoc(), TII->get(X86::POP64r))
+  //     .addReg(X86::R15);
+  // BuildMI(*last_bb, *last_mi, last_mi->getDebugLoc(), TII->get(X86::POP64r))
+  //     .addReg(X86::R14);
+  // BuildMI(*last_bb, *last_mi, last_mi->getDebugLoc(), TII->get(X86::POP64r))
+  //     .addReg(X86::R13);
+  // BuildMI(*last_bb, *last_mi, last_mi->getDebugLoc(), TII->get(X86::POP64r))
+  //     .addReg(X86::R12);
+
   std::vector<MachineInstr *> Instructions;
   for (auto &MBB : MF) {
     for (llvm::MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
          I != E; ++I) {
       llvm::MachineInstr &MI = *I;
       DebugLoc DL = MI.getDebugLoc();
-      const auto &STI = MF.getSubtarget();
-      auto *TII = STI.getInstrInfo();
 
       if (MI.getOpcode() == X86::SBB64ri32) {
         int CurIdx = MI.getOperand(2).getImm();
@@ -11766,7 +11790,7 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
           }
           /* llvm::errs() << "Transforming instruction at idx " << CurIdx << "\n"; */
           Instructions.push_back(&NextMI);
-          doesModifyFunction = true;
+
         }
       }
     }
@@ -11775,7 +11799,7 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
   for (MachineInstr *MI : Instructions) {
     doX86CompSimpHardening(MI, MF);
   }
-  return doesModifyFunction;
+  return true;
 }
 
 // This will eventually check for the secret attribute. For now, just use

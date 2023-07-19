@@ -3306,27 +3306,22 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
   }
   FunctionsInstrumented.insert(SubName);
 
+  const auto &STI = MF.getSubtarget();
+  auto *TII = STI.getInstrInfo();
+
   for (auto &MBB : MF) {
     // llvm::errs() << "Checking basic block " << MBB << "\n";
     for (llvm::MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
          I != E; ++I) {
       llvm::MachineInstr &MI = *I;
       DebugLoc DL = MI.getDebugLoc();
-      const auto &STI = MF.getSubtarget();
-      auto *TII = STI.getInstrInfo();
       
-      // llvm::errs() << "Checking instruction " << MI << "\n";
-
       if (MI.getOpcode() == X86::SBB64ri32) {
         int CurIdx = MI.getOperand(2).getImm();
-
-        // llvm::errs() << "Found SBB64ri32 instruction at index " << CurIdx << "\n";
 
         if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
           I++;
           llvm::MachineInstr &NextMI = *I;
-
-          // llvm::errs() << "Found instruction " << NextMI << "\n";
 
           std::string CurOpcodeName = TII->getName(NextMI.getOpcode()).str();
           // don't count 'meta' insns like debug info, CFI indicators
@@ -3358,10 +3353,10 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
             errs() << "Mismatch in instruction indices in function " << SubName
                    << '\n';
 
-            assert(false && "Mismatch in instruction indices");
+            
             errs() << "CSV Row was:\n";
             ErrIter->Print();
-            // exit(-1);
+	    assert(false && "Mismatch in instruction indices");
           }
           this->doX86SilentStoreHardening(NextMI, MBB, MF, Remove);
           doesModifyFunction = true;
