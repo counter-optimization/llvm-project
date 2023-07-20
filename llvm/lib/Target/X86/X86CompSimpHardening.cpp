@@ -47,9 +47,12 @@ static cl::opt<bool> EnableCompSimpDynStat(
 
 static cl::opt<bool> RecordTestCycleCounts(
     "x86-cs-test-cycle-counts",
-    cl::desc("If testing x86 CS,SS passes, also record cycle counts."),
+    cl::desc("If testing x86 CS passes, also record cycle counts."),
     cl::init(false));
 
+/* the opcode here is no significance, just to
+   deduce placeholder type since i'm too lazy to
+   find what the enum name is */
 auto TestAddedOpcode = X86::VPCOMPRESSBZ256rrkz;
 
 namespace {
@@ -10802,6 +10805,10 @@ static void setupTest(MachineFunction &MF) {
         auto Op = MF->getName().split('_').second.rsplit('_').first;
         llvm::errs() << "Op setupTest \t" << Op << "\n";
 
+	MachineInstr* AddedMI = nullptr;
+
+	constexpr int CycleCountMeasureAmortizationCount = 2000;
+
 	/* insert saves of r10-15 */
 	{
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
@@ -10823,12 +10830,18 @@ static void setupTest(MachineFunction &MF) {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 		.addReg(X86::RAX);
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+		.addReg(X86::RBX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+		.addReg(X86::RCX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 		.addReg(X86::RDX);
 	    
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::CPUID));
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::RDTSC));
 
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RDX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RCX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RBX);
 
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
 	      .addReg(X86::RDI)
@@ -10841,615 +10854,639 @@ static void setupTest(MachineFunction &MF) {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RAX);
 	}
 
-	if (Op == "LEA64r") {
-	    TestAddedOpcode = X86::LEA64r;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::LEA64r), X86::RSI)
-		.addReg(X86::RDX) // base
-		.addImm(2) // scale
-		.addReg(X86::RCX) //index
-		.addImm(73) //displacement
-		.addReg(0); //no segment reg
-	}
-	else if (Op == "LEA64_32r") {
-	    TestAddedOpcode = X86::LEA64_32r;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::LEA64_32r), X86::ESI)
-		.addReg(X86::RDX) // base
-		.addImm(2) // scale
-		.addReg(X86::RCX) //index
-		.addImm(73) //displacement
-		.addReg(0); //no segment reg
-	}
-	else if (Op == "AND64rm") {
-	    TestAddedOpcode = X86::AND64rm;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::AND64rm), X86::RSI)
-		.addReg(X86::RSI)
-		.addReg(X86::RDX)
-		.addImm(0)
-		.addReg(0)
-		.addImm(0)
-		.addReg(0);
-	}
-        else if (Op == "ADD64ri8") {
-	    TestAddedOpcode = X86::ADD64ri8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RSI)
-              .addReg(X86::RSI)
-              .addImm(0x25);
-	}
-        else if (Op == "ADD64mi32") {
-	    TestAddedOpcode = X86::ADD64mi32;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi32))
-	    .addReg(X86::RSI)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0x25);
-	} else if (Op == "ADD32ri") {
-	    TestAddedOpcode = X86::ADD32ri;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri), X86::ESI)
-		.addReg(X86::ESI)
-		.addImm(0xFFFF'FFFFUL);
-	}
-        else if (Op == "ADD32ri8") {
-	    TestAddedOpcode = X86::ADD32ri8;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri8), X86::ESI)
-		.addReg(X86::ESI)
-		.addImm(1ULL << 7ULL);
-	}
-        else if (Op == "ADD64ri32") {
-	    TestAddedOpcode = X86::ADD64ri32;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri32), X86::RSI)
-              .addReg(X86::RSI)
-              .addImm(0x25);
-        } else if (Op == "ADD64mi8") {
-	    TestAddedOpcode = X86::ADD64mi8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi8))
-              .addReg(X86::RSI)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0x25);
-        } else if (Op == "ADD64mr") {
-	    TestAddedOpcode = X86::ADD64mr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr))
-              .addReg(X86::RSI)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addReg(X86::RDX);
-        } else if (Op == "ADD64rm") {
-	    TestAddedOpcode = X86::ADD64rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64rm), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "ADD64rr") {
-	    TestAddedOpcode = X86::ADD64rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64rr), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX);
-        } else if (Op == "ADC64rr") {
-	    TestAddedOpcode = X86::ADC64rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64rr), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX);
-        } else if (Op == "ADC64rm") {
-	    TestAddedOpcode = X86::ADC64rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64rm), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "ADC64mr") {
-	    TestAddedOpcode = X86::ADC64mr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64mr))
-              .addReg(X86::RSI)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addReg(X86::RDX);
-        } else if (Op == "ADC32ri8") {
-	    TestAddedOpcode = X86::ADC32ri8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADC32ri8), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x25);
-        } else if (Op == "ADD32rr") {
-	    TestAddedOpcode = X86::ADD32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32rr), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-        } else if (Op == "ADD32rm") {
-	    TestAddedOpcode = X86::ADD32rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32rm), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "ADC32mi8") {
-	    TestAddedOpcode = X86::ADC32mi8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADC32mi8))
-              .addReg(X86::RSI)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0x25);
-        } else if (Op == "ADD8rm") {
-	    TestAddedOpcode = X86::ADD8rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8rm), X86::SIL)
-              .addReg(X86::SIL)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "AND64rr") {
-	    TestAddedOpcode = X86::AND64rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::AND64rr), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX);
-        } else if (Op == "AND64ri32") {
-	    TestAddedOpcode = X86::AND64ri32;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::AND64ri32), X86::RSI)
-              .addReg(X86::RSI)
-              .addImm(0x25);
-        } else if (Op == "AND64ri8") {
-	    TestAddedOpcode = X86::AND64ri8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::AND64ri8), X86::RSI)
-              .addReg(X86::RSI)
-              .addImm(0x25);
-        } else if (Op == "AND32rr") {
-	    TestAddedOpcode = X86::AND32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::AND32rr), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-        } else if (Op == "AND32ri8") {
-	    TestAddedOpcode = X86::AND32ri8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::AND32ri8), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x25);
-        } else if (Op == "AND32ri") {
-	    TestAddedOpcode = X86::AND32ri;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::AND32ri), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x25);
-        } else if (Op == "OR64rr") {
-	    TestAddedOpcode = X86::OR64rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::OR64rr), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX);
-        } else if (Op == "OR64rm") {
-	    TestAddedOpcode = X86::OR64rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::OR64rm), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "OR64ri8") {
-	    TestAddedOpcode = X86::OR64ri8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::OR64ri8), X86::RSI)
-              .addReg(X86::RSI)
-              .addImm(0x25);
-        } else if (Op == "OR32rr") {
-	    TestAddedOpcode = X86::OR32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::OR32rr), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-        } else if (Op == "OR32ri8") {
-	    TestAddedOpcode = X86::OR32ri8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::OR32ri8), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x25);
-        } else if (Op == "OR8rm") {
-	    TestAddedOpcode = X86::OR8rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::OR8rm), X86::SIL)
-              .addReg(X86::SIL)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "IMUL32rm") {
-	    TestAddedOpcode = X86::IMUL32rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rm), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "IMUL64rr") {
-	    TestAddedOpcode = X86::IMUL64rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rr), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX);
-        }
-        else if (Op == "IMUL64rm") {
-	    TestAddedOpcode = X86::IMUL64rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rm), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        }
-        else if (Op == "IMUL64rri8") {
-	    TestAddedOpcode = X86::IMUL64rri8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rri8), X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(0x25);
-        } else if (Op == "IMUL64rri32") {
-	    TestAddedOpcode = X86::IMUL64rri32;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rri8), X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(0x25);
-        } else if (Op == "IMUL64rmi32") {
-	    TestAddedOpcode = X86::IMUL64rmi32;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rmi32), X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0x25);
-        } else if (Op == "XOR64rr") {
-	    TestAddedOpcode = X86::XOR64rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64rr), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX);
-        } else if (Op == "XOR64rm") {
-	    TestAddedOpcode = X86::XOR64rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64rm), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "XOR64mr") {
-	    TestAddedOpcode = X86::XOR64mr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64mr))
-              .addReg(X86::RSI)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addReg(X86::RDX);
-        } else if (Op == "XOR32rr") {
-	    TestAddedOpcode = X86::XOR32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32rr), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-        } else if (Op == "XOR32rm") {
-	    TestAddedOpcode = X86::XOR32rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32rm), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-	} else if (Op == "XOR32ri") {
-	    TestAddedOpcode = X86::XOR32ri;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32ri), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x25);
-        } else if (Op == "XOR32ri8") {
-	    TestAddedOpcode = X86::XOR32ri8;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32ri8), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x25);
-        } else if (Op == "XOR8rm") {
-	    TestAddedOpcode = X86::XOR8rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::XOR8rm), X86::SIL)
-              .addReg(X86::SIL)
-              .addReg(X86::RDX)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "SUB64rr") {
-	    TestAddedOpcode = X86::SUB64rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB64rr), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX);
-        } else if (Op == "SUB64rm") {
-	    TestAddedOpcode = X86::SUB64rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB64rm), X86::RSI)
-              .addReg(X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "SUB32rr") {
-	    TestAddedOpcode = X86::SUB32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32rr), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-        } else if (Op == "TEST32rr") {
-	    TestAddedOpcode = X86::TEST32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::TEST32rr))
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-	} else if (Op == "AND8ri") {
-	    TestAddedOpcode = X86::AND8ri;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::AND8ri), X86::SIL)
-		.addReg(X86::SIL)
-		.addImm(0x33);
-        } else if (Op == "TEST8ri") {
-	    TestAddedOpcode = X86::TEST8ri;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::TEST8ri))
-              .addReg(X86::SIL)
-              .addImm(0x25);
-        } else if (Op == "TEST8mi") {
-	    TestAddedOpcode = X86::TEST8mi;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::TEST8mi))
-              .addReg(X86::RSI)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0x25);
-        } else if (Op == "AND16rr") {
-	    TestAddedOpcode = X86::AND16rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::AND16rr), X86::SI)
-              .addReg(X86::SI)
-              .addReg(X86::DX);
-        } else if (Op == "OR16rr") {
-	    TestAddedOpcode = X86::OR16rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::OR16rr), X86::SI)
-              .addReg(X86::SI)
-              .addReg(X86::DX);
-        } else if (Op == "XOR16rr") {
-	    TestAddedOpcode = X86::XOR16rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::XOR16rr), X86::SI)
-              .addReg(X86::SI)
-              .addReg(X86::DX);
-        } else if (Op == "SUB16rr") {
-	    TestAddedOpcode = X86::SUB16rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB16rr), X86::SI)
-              .addReg(X86::SI)
-              .addReg(X86::DX);
-	} else if (Op == "ADD8ri") {
-	    TestAddedOpcode = X86::ADD8ri;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8ri), X86::SIL)
-		.addReg(X86::SIL)
-		.addImm(0xFF);
-	}
-        else if (Op == "ADD16rr") {
-	    TestAddedOpcode = X86::ADD16rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD16rr), X86::SI)
-              .addReg(X86::SI)
-              .addReg(X86::DX);
-        } else if (Op == "OR8rr") {
-	    TestAddedOpcode = X86::OR8rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::OR8rr), X86::SIL)
-              .addReg(X86::SIL)
-              .addReg(X86::DL);
-	} else if (Op == "OR8ri") {
-	    TestAddedOpcode = X86::OR8ri;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::OR8ri), X86::SIL)
-		.addReg(X86::SIL)
-		.addImm(0XCCULL);
-        } else if (Op == "SUB8rr") {
-	    TestAddedOpcode = X86::SUB8rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr), X86::SIL)
-              .addReg(X86::SIL)
-              .addReg(X86::DL);
-        } else if (Op == "ADD8rr") {
-	    TestAddedOpcode = X86::ADD8rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8rr), X86::SIL)
-              .addReg(X86::SIL)
-              .addReg(X86::DL);
-        } else if (Op == "SUB32rm") {
-	    TestAddedOpcode = X86::SUB32rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32rm), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::RDX)
-              .addImm(1)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "SHR64rCL") {
-	    TestAddedOpcode = X86::SHR64rCL;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64rCL), X86::RSI)
-              .addReg(X86::RSI);
-        } else if (Op == "SHR32rCL") {
-	    TestAddedOpcode = X86::SHR32rCL;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32rCL), X86::ESI)
-              .addReg(X86::ESI);
-        } else if (Op == "SHL32rCL") {
-	    TestAddedOpcode = X86::SHL32rCL;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHL32rCL), X86::EDX)
-              .addReg(X86::EDX);
+	int AmortizeCount = 0;
 
-        } else if (Op == "SHL16rCL") {
-	    TestAddedOpcode = X86::SHL16rCL;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHL16rCL), X86::SI)
-              .addReg(X86::SI);
-        } else if (Op == "SHR8rCL") {
-	    TestAddedOpcode = X86::SHL8rCL;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR8rCL), X86::SIL)
-              .addReg(X86::SIL);
-        } else if (Op == "SHL8rCL") {
-	    TestAddedOpcode = X86::SHL8rCL;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHL8rCL), X86::SIL)
-              .addReg(X86::SIL);
-        } else if (Op == "SHR8ri") {
-	    TestAddedOpcode = X86::SHR8ri;
-                BuildMI(*MBB, &MI, DL, TII->get(X86::SHR8ri), X86::SIL)
+	/* if recording cycle counts, insert the insn
+	   CycleCountMeasureAmortizationCounttimes. otherwise,
+	   probably testing correctness so just insert once. this
+	   is why the do ... while ... loop */
+	do {
+	    if (Op == "LEA64r") {
+		TestAddedOpcode = X86::LEA64r;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::LEA64r), X86::RSI)
+		    .addReg(X86::RDX) // base
+		    .addImm(2) // scale
+		    .addReg(X86::RCX) //index
+		    .addImm(73) //displacement
+		    .addReg(0); //no segment reg
+	    }
+	    else if (Op == "LEA64_32r") {
+		TestAddedOpcode = X86::LEA64_32r;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::LEA64_32r), X86::ESI)
+		    .addReg(X86::RDX) // base
+		    .addImm(2) // scale
+		    .addReg(X86::RCX) //index
+		    .addImm(73) //displacement
+		    .addReg(0); //no segment reg
+	    }
+	    else if (Op == "AND64rm") {
+		TestAddedOpcode = X86::AND64rm;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND64rm), X86::RSI)
+		    .addReg(X86::RSI)
+		    .addReg(X86::RDX)
+		    .addImm(0)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0);
+	    }
+	    else if (Op == "ADD64ri8") {
+		TestAddedOpcode = X86::ADD64ri8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri8), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addImm(0x25);
+	    }
+	    else if (Op == "ADD64mi32") {
+		TestAddedOpcode = X86::ADD64mi32;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi32))
+		.addReg(X86::RSI)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0x25);
+	    } else if (Op == "ADD32ri") {
+		TestAddedOpcode = X86::ADD32ri;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri), X86::ESI)
+		    .addReg(X86::ESI)
+		    .addImm(0xFFFF'FFFFUL);
+	    }
+	    else if (Op == "ADD32ri8") {
+		TestAddedOpcode = X86::ADD32ri8;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri8), X86::ESI)
+		    .addReg(X86::ESI)
+		    .addImm(1ULL << 7ULL);
+	    }
+	    else if (Op == "ADD64ri32") {
+		TestAddedOpcode = X86::ADD64ri32;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri32), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addImm(0x25);
+	    } else if (Op == "ADD64mi8") {
+		TestAddedOpcode = X86::ADD64mi8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi8))
+		  .addReg(X86::RSI)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0x25);
+	    } else if (Op == "ADD64mr") {
+		TestAddedOpcode = X86::ADD64mr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr))
+		  .addReg(X86::RSI)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addReg(X86::RDX);
+	    } else if (Op == "ADD64rm") {
+		TestAddedOpcode = X86::ADD64rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64rm), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "ADD64rr") {
+		TestAddedOpcode = X86::ADD64rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64rr), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX);
+	    } else if (Op == "ADC64rr") {
+		TestAddedOpcode = X86::ADC64rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64rr), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX);
+	    } else if (Op == "ADC64rm") {
+		TestAddedOpcode = X86::ADC64rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64rm), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "ADC64mr") {
+		TestAddedOpcode = X86::ADC64mr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADC64mr))
+		  .addReg(X86::RSI)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addReg(X86::RDX);
+	    } else if (Op == "ADC32ri8") {
+		TestAddedOpcode = X86::ADC32ri8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADC32ri8), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addImm(0x25);
+	    } else if (Op == "ADD32rr") {
+		TestAddedOpcode = X86::ADD32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32rr), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "ADD32rm") {
+		TestAddedOpcode = X86::ADD32rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32rm), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "ADC32mi8") {
+		TestAddedOpcode = X86::ADC32mi8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADC32mi8))
+		  .addReg(X86::RSI)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0x25);
+	    } else if (Op == "ADD8rm") {
+		TestAddedOpcode = X86::ADD8rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8rm), X86::SIL)
+		  .addReg(X86::SIL)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "AND64rr") {
+		TestAddedOpcode = X86::AND64rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND64rr), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX);
+	    } else if (Op == "AND64ri32") {
+		TestAddedOpcode = X86::AND64ri32;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND64ri32), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addImm(0x25);
+	    } else if (Op == "AND64ri8") {
+		TestAddedOpcode = X86::AND64ri8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND64ri8), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addImm(0x25);
+	    } else if (Op == "AND32rr") {
+		TestAddedOpcode = X86::AND32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND32rr), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "AND32ri8") {
+		TestAddedOpcode = X86::AND32ri8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND32ri8), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addImm(0x25);
+	    } else if (Op == "AND32ri") {
+		TestAddedOpcode = X86::AND32ri;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND32ri), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addImm(0x25);
+	    } else if (Op == "OR64rr") {
+		TestAddedOpcode = X86::OR64rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR64rr), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX);
+	    } else if (Op == "OR64rm") {
+		TestAddedOpcode = X86::OR64rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR64rm), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "OR64ri8") {
+		TestAddedOpcode = X86::OR64ri8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR64ri8), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addImm(0x25);
+	    } else if (Op == "OR32rr") {
+		TestAddedOpcode = X86::OR32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR32rr), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "OR32ri8") {
+		TestAddedOpcode = X86::OR32ri8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR32ri8), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addImm(0x25);
+	    } else if (Op == "OR8rm") {
+		TestAddedOpcode = X86::OR8rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR8rm), X86::SIL)
+		  .addReg(X86::SIL)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "IMUL32rm") {
+		TestAddedOpcode = X86::IMUL32rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rm), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "IMUL64rr") {
+		TestAddedOpcode = X86::IMUL64rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rr), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX);
+	    }
+	    else if (Op == "IMUL64rm") {
+		TestAddedOpcode = X86::IMUL64rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rm), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    }
+	    else if (Op == "IMUL64rri8") {
+		TestAddedOpcode = X86::IMUL64rri8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rri8), X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(0x25);
+	    } else if (Op == "IMUL64rri32") {
+		TestAddedOpcode = X86::IMUL64rri32;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rri8), X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(0x25);
+	    } else if (Op == "IMUL64rmi32") {
+		TestAddedOpcode = X86::IMUL64rmi32;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL64rmi32), X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0x25);
+	    } else if (Op == "XOR64rr") {
+		TestAddedOpcode = X86::XOR64rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64rr), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX);
+	    } else if (Op == "XOR64rm") {
+		TestAddedOpcode = X86::XOR64rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64rm), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "XOR64mr") {
+		TestAddedOpcode = X86::XOR64mr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64mr))
+		  .addReg(X86::RSI)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addReg(X86::RDX);
+	    } else if (Op == "XOR32rr") {
+		TestAddedOpcode = X86::XOR32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32rr), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "XOR32rm") {
+		TestAddedOpcode = X86::XOR32rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32rm), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "XOR32ri") {
+		TestAddedOpcode = X86::XOR32ri;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32ri), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addImm(0x25);
+	    } else if (Op == "XOR32ri8") {
+		TestAddedOpcode = X86::XOR32ri8;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR32ri8), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addImm(0x25);
+	    } else if (Op == "XOR8rm") {
+		TestAddedOpcode = X86::XOR8rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR8rm), X86::SIL)
+		  .addReg(X86::SIL)
+		  .addReg(X86::RDX)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "SUB64rr") {
+		TestAddedOpcode = X86::SUB64rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SUB64rr), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX);
+	    } else if (Op == "SUB64rm") {
+		TestAddedOpcode = X86::SUB64rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SUB64rm), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "SUB32rr") {
+		TestAddedOpcode = X86::SUB32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32rr), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "TEST32rr") {
+		TestAddedOpcode = X86::TEST32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::TEST32rr))
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "AND8ri") {
+		TestAddedOpcode = X86::AND8ri;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND8ri), X86::SIL)
 		    .addReg(X86::SIL)
-		    .addImm(2);
-	} else if (Op == "SHR32ri") {
-	    TestAddedOpcode = X86::SHR32ri;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32ri), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(17);
-        } else if (Op == "SHL32ri") {
-	    TestAddedOpcode = X86::SHL32ri;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHL32ri), X86::ESI)
-              .addReg(X86::ESI)
-              .addImm(0x8);
-        } else if (Op == "SHL64ri") {
-	    TestAddedOpcode = X86::SHL64ri;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHL64ri), X86::RSI)
-              .addReg(X86::RSI)
-              .addImm(0x25);
-        } else if (Op == "SAR64ri") {
-	    TestAddedOpcode = X86::SAR64ri;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SAR64ri), X86::RSI)
-              .addReg(X86::RSI)
-              .addImm(0x25);
-	} else if (Op == "SHR64r1") {
-	    TestAddedOpcode = X86::SHR64r1;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64r1), X86::RSI)
-              .addReg(X86::RSI);
-        } else if (Op == "SHR64ri") {
-	    TestAddedOpcode = X86::SHR64ri;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64ri), X86::RSI)
-              .addReg(X86::RSI)
-              .addImm(0x25);
-        } else if (Op == "SAR8ri") {
-	    TestAddedOpcode = X86::SAR8ri;
-                BuildMI(*MBB, &MI, DL, TII->get(X86::SAR8ri), X86::SIL)
+		    .addImm(0x33);
+	    } else if (Op == "TEST8ri") {
+		TestAddedOpcode = X86::TEST8ri;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::TEST8ri))
+		  .addReg(X86::SIL)
+		  .addImm(0x25);
+	    } else if (Op == "TEST8mi") {
+		TestAddedOpcode = X86::TEST8mi;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::TEST8mi))
+		  .addReg(X86::RSI)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0x25);
+	    } else if (Op == "AND16rr") {
+		TestAddedOpcode = X86::AND16rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND16rr), X86::SI)
+		  .addReg(X86::SI)
+		  .addReg(X86::DX);
+	    } else if (Op == "OR16rr") {
+		TestAddedOpcode = X86::OR16rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR16rr), X86::SI)
+		  .addReg(X86::SI)
+		  .addReg(X86::DX);
+	    } else if (Op == "XOR16rr") {
+		TestAddedOpcode = X86::XOR16rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR16rr), X86::SI)
+		  .addReg(X86::SI)
+		  .addReg(X86::DX);
+	    } else if (Op == "SUB16rr") {
+		TestAddedOpcode = X86::SUB16rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SUB16rr), X86::SI)
+		  .addReg(X86::SI)
+		  .addReg(X86::DX);
+	    } else if (Op == "ADD8ri") {
+		TestAddedOpcode = X86::ADD8ri;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8ri), X86::SIL)
 		    .addReg(X86::SIL)
-		    .addImm(3);
-        } else if (Op == "SHR32r1") {
-	    TestAddedOpcode = X86::SHR32r1;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32r1), X86::ESI)
-              .addReg(X86::ESI);
-        } else if (Op == "SAR32r1") {
-	    TestAddedOpcode = X86::SAR32r1;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SAR32r1), X86::ESI)
-              .addReg(X86::ESI);
-        } else if (Op == "MUL32r") {
-	    TestAddedOpcode = X86::MUL32r;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::MUL32r))
-              .addReg(X86::ESI);
-	} else if (Op == "MUL64r") {
-	    TestAddedOpcode = X86::MUL64r;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::MUL64r))
-		.addReg(X86::RSI);
-	} else if (Op == "MUL64m") {
-	    TestAddedOpcode = X86::MUL64m;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::MUL64m))
-		.addReg(X86::RCX)
-		.addImm(1)
-		.addReg(0)
-		.addImm(0)
-		.addReg(0);
-	} else if (Op == "CMP64rr") {
-	    TestAddedOpcode = X86::CMP64rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64rr))
-              .addReg(X86::RSI)
-              .addReg(X86::RDX);
-        } else if (Op == "CMP64rm") {
-	    TestAddedOpcode = X86::CMP64rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64rm))
-              .addReg(X86::RSI)
-              .addReg(X86::RDX)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-	} else if (Op == "CMP64mr") {
-	    TestAddedOpcode = X86::CMP64mr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64mr))
-              .addReg(X86::RSI)
-	      .addImm(0)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addReg(X86::RDX);
-        } else if (Op == "CMP32rr") {
-	    TestAddedOpcode = X86::CMP32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32rr))
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-        } else if (Op == "CMP32rm") {
-	    TestAddedOpcode = X86::CMP32rm;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32rm))
-              .addReg(X86::ESI)
-              .addReg(X86::RDX)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0);
-        } else if (Op == "CMP32mr") {
-	    TestAddedOpcode = X86::CMP32mr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32mr))
-              .addReg(X86::RDX)
-              .addImm(0)
-              .addReg(0)
-              .addImm(0)
-              .addReg(0)
-              .addReg(X86::ESI);
-        } else if (Op == "CMP8rr") {
-	    TestAddedOpcode = X86::CMP8rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::CMP8rr))
-              .addReg(X86::SIL)
-              .addReg(X86::DL);
-        } else if (Op == "SBB32rr") {
-	    TestAddedOpcode = X86::SBB32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::SBB32rr), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-        } else if (Op == "IMUL32rr") {
-	    TestAddedOpcode = X86::IMUL32rr;
-          BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rr), X86::ESI)
-              .addReg(X86::ESI)
-              .addReg(X86::EDX);
-	} else if (Op == "PADDDrr") {
-	    TestAddedOpcode = X86::PADDDrr;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::PADDDrr), X86::XMM0)
-		.addReg(X86::XMM0)
-		.addReg(X86::XMM1);
-        }
-	else if (Op == "PADDDrm") {
-	    TestAddedOpcode = X86::PADDDrm;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::PADDDrm), X86::XMM0)
-		.addReg(X86::XMM0)
-		.addReg(X86::RDX)
-		.addImm(1)
-		.addReg(0)
-		.addImm(0)
-		.addReg(0);
-        }
-	else if (Op == "PADDQrr") {
-	    TestAddedOpcode = X86::PADDQrr;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrr), X86::XMM0)
-		.addReg(X86::XMM0)
-		.addReg(X86::XMM1);
-        }
-	else if (Op == "PADDQrm") {
-	    TestAddedOpcode = X86::PADDQrm;
-	    BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrm), X86::XMM0)
-		.addReg(X86::XMM0)
-		.addReg(X86::RDX)
-		.addImm(1)
-		.addReg(0)
-		.addImm(0)
-		.addReg(0);
-        }
+		    .addImm(0xFF);
+	    }
+	    else if (Op == "ADD16rr") {
+		TestAddedOpcode = X86::ADD16rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD16rr), X86::SI)
+		  .addReg(X86::SI)
+		  .addReg(X86::DX);
+	    } else if (Op == "OR8rr") {
+		TestAddedOpcode = X86::OR8rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR8rr), X86::SIL)
+		  .addReg(X86::SIL)
+		  .addReg(X86::DL);
+	    } else if (Op == "OR8ri") {
+		TestAddedOpcode = X86::OR8ri;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR8ri), X86::SIL)
+		    .addReg(X86::SIL)
+		    .addImm(0XCCULL);
+	    } else if (Op == "SUB8rr") {
+		TestAddedOpcode = X86::SUB8rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SUB8rr), X86::SIL)
+		  .addReg(X86::SIL)
+		  .addReg(X86::DL);
+	    } else if (Op == "ADD8rr") {
+		TestAddedOpcode = X86::ADD8rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8rr), X86::SIL)
+		  .addReg(X86::SIL)
+		  .addReg(X86::DL);
+	    } else if (Op == "SUB32rm") {
+		TestAddedOpcode = X86::SUB32rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32rm), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::RDX)
+		  .addImm(1)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "SHR64rCL") {
+		TestAddedOpcode = X86::SHR64rCL;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64rCL), X86::RSI)
+		  .addReg(X86::RSI);
+	    } else if (Op == "SHR32rCL") {
+		TestAddedOpcode = X86::SHR32rCL;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32rCL), X86::ESI)
+		  .addReg(X86::ESI);
+	    } else if (Op == "SHL32rCL") {
+		TestAddedOpcode = X86::SHL32rCL;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHL32rCL), X86::EDX)
+		  .addReg(X86::EDX);
+
+	    } else if (Op == "SHL16rCL") {
+		TestAddedOpcode = X86::SHL16rCL;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHL16rCL), X86::SI)
+		  .addReg(X86::SI);
+	    } else if (Op == "SHR8rCL") {
+		TestAddedOpcode = X86::SHL8rCL;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHR8rCL), X86::SIL)
+		  .addReg(X86::SIL);
+	    } else if (Op == "SHL8rCL") {
+		TestAddedOpcode = X86::SHL8rCL;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHL8rCL), X86::SIL)
+		  .addReg(X86::SIL);
+	    } else if (Op == "SHR8ri") {
+		TestAddedOpcode = X86::SHR8ri;
+		    AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHR8ri), X86::SIL)
+			.addReg(X86::SIL)
+			.addImm(2);
+	    } else if (Op == "SHR32ri") {
+		TestAddedOpcode = X86::SHR32ri;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32ri), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addImm(17);
+	    } else if (Op == "SHL32ri") {
+		TestAddedOpcode = X86::SHL32ri;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHL32ri), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addImm(0x8);
+	    } else if (Op == "SHL64ri") {
+		TestAddedOpcode = X86::SHL64ri;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHL64ri), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addImm(0x25);
+	    } else if (Op == "SAR64ri") {
+		TestAddedOpcode = X86::SAR64ri;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SAR64ri), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addImm(0x25);
+	    } else if (Op == "SHR64r1") {
+		TestAddedOpcode = X86::SHR64r1;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64r1), X86::RSI)
+		  .addReg(X86::RSI);
+	    } else if (Op == "SHR64ri") {
+		TestAddedOpcode = X86::SHR64ri;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHR64ri), X86::RSI)
+		  .addReg(X86::RSI)
+		  .addImm(0x25);
+	    } else if (Op == "SAR8ri") {
+		TestAddedOpcode = X86::SAR8ri;
+		    AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SAR8ri), X86::SIL)
+			.addReg(X86::SIL)
+			.addImm(3);
+	    } else if (Op == "SHR32r1") {
+		TestAddedOpcode = X86::SHR32r1;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SHR32r1), X86::ESI)
+		  .addReg(X86::ESI);
+	    } else if (Op == "SAR32r1") {
+		TestAddedOpcode = X86::SAR32r1;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SAR32r1), X86::ESI)
+		  .addReg(X86::ESI);
+	    } else if (Op == "MUL32r") {
+		TestAddedOpcode = X86::MUL32r;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MUL32r))
+		  .addReg(X86::ESI);
+	    } else if (Op == "MUL64r") {
+		TestAddedOpcode = X86::MUL64r;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MUL64r))
+		    .addReg(X86::RSI);
+	    } else if (Op == "MUL64m") {
+		TestAddedOpcode = X86::MUL64m;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MUL64m))
+		    .addReg(X86::RCX)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0);
+	    } else if (Op == "CMP64rr") {
+		TestAddedOpcode = X86::CMP64rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64rr))
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX);
+	    } else if (Op == "CMP64rm") {
+		TestAddedOpcode = X86::CMP64rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64rm))
+		  .addReg(X86::RSI)
+		  .addReg(X86::RDX)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "CMP64mr") {
+		TestAddedOpcode = X86::CMP64mr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::CMP64mr))
+		  .addReg(X86::RSI)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addReg(X86::RDX);
+	    } else if (Op == "CMP32rr") {
+		TestAddedOpcode = X86::CMP32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32rr))
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "CMP32rm") {
+		TestAddedOpcode = X86::CMP32rm;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32rm))
+		  .addReg(X86::ESI)
+		  .addReg(X86::RDX)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0);
+	    } else if (Op == "CMP32mr") {
+		TestAddedOpcode = X86::CMP32mr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::CMP32mr))
+		  .addReg(X86::RDX)
+		  .addImm(0)
+		  .addReg(0)
+		  .addImm(0)
+		  .addReg(0)
+		  .addReg(X86::ESI);
+	    } else if (Op == "CMP8rr") {
+		TestAddedOpcode = X86::CMP8rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::CMP8rr))
+		  .addReg(X86::SIL)
+		  .addReg(X86::DL);
+	    } else if (Op == "SBB32rr") {
+		TestAddedOpcode = X86::SBB32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SBB32rr), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "IMUL32rr") {
+		TestAddedOpcode = X86::IMUL32rr;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::IMUL32rr), X86::ESI)
+		  .addReg(X86::ESI)
+		  .addReg(X86::EDX);
+	    } else if (Op == "PADDDrr") {
+		TestAddedOpcode = X86::PADDDrr;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PADDDrr), X86::XMM0)
+		    .addReg(X86::XMM0)
+		    .addReg(X86::XMM1);
+	    }
+	    else if (Op == "PADDDrm") {
+		TestAddedOpcode = X86::PADDDrm;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PADDDrm), X86::XMM0)
+		    .addReg(X86::XMM0)
+		    .addReg(X86::RDX)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0);
+	    }
+	    else if (Op == "PADDQrr") {
+		TestAddedOpcode = X86::PADDQrr;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrr), X86::XMM0)
+		    .addReg(X86::XMM0)
+		    .addReg(X86::XMM1);
+	    }
+	    else if (Op == "PADDQrm") {
+		TestAddedOpcode = X86::PADDQrm;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PADDQrm), X86::XMM0)
+		    .addReg(X86::XMM0)
+		    .addReg(X86::RDX)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0);
+	    } else if (Op == "VPCOMPRESSBZ256rrkz") {
+		TestAddedOpcode = X86::VPCOMPRESSBZ256rrkz;
+		/* empty test case to get cycle count benchmarking
+		   overhead counts */
+	    }
+	
+	    if (nullptr != AddedMI) {
+	       AddedMI->NeedsTransforming = true;
+	    }
+	    
+	    AmortizeCount += 1;
+	} 
+	while (RecordTestCycleCounts &&
+	       AmortizeCount < CycleCountMeasureAmortizationCount); 
 
 	if (RecordTestCycleCounts) {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 		.addReg(X86::RAX);
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+		.addReg(X86::RBX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+		.addReg(X86::RCX);
+            BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 		.addReg(X86::RDX);
 	    
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::RDTSCP));
@@ -11479,6 +11516,8 @@ static void setupTest(MachineFunction &MF) {
 	      .addReg(X86::R11);
 
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RDX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RCX);
+	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RBX);
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RAX);
 	}
 
@@ -11740,8 +11779,8 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
             MIs.push_back(&MI);
         }
       }
-      for (auto &MI : MIs) {
-      	  if (MI->getOpcode() == TestAddedOpcode) {
+      for (auto& MI : MIs) {
+      	  if (MI->NeedsTransforming) {
 	     doX86CompSimpHardening(MI, MF);
 	  }
       }

@@ -278,6 +278,8 @@ private:
             SmallPtrSetImpl<const MachineInstr *> &AlreadySeenInstrs) const;
 
 public:
+  bool NeedsTransforming = false;
+    
   MachineInstr(const MachineInstr &) = delete;
   MachineInstr &operator=(const MachineInstr &) = delete;
   // Use MachineFunction::DeleteMachineInstr() instead.

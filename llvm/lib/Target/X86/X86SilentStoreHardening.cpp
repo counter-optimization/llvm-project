@@ -46,6 +46,11 @@ static cl::opt<std::string> SilentStoreCSVPath("x86-ss-csv-path",
                         cl::desc("X86 silent store csv path."),
                         cl::init("test_alert.csv"));
 
+static cl::opt<bool> RecordTestCycleCounts(
+    "x86-ss-test-cycle-counts",
+    cl::desc("If testing x86 SS passes, also record cycle counts."),
+    cl::init(false));
+
 static cl::opt<bool> GenIndex("x86-gen-idx-ss",
                         cl::desc("Generate global indices for silent store instrumentation"),
                         cl::init(false));
@@ -2824,6 +2829,10 @@ static void setupTest(MachineFunction &MF) {
 		auto Op = MF->getName().split('_').second.rsplit('_').first;
 		llvm::errs() << "Op setupTest \t" << Op << "\n";
 
+		MachineInstr* AddedMI = nullptr;
+		constexpr int CycleCountMeasureAmortizationCount = 2000;
+		int AmortizeCount = 0;
+
 		/* insert saves of r10-15 */
 		{
 		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
@@ -2840,11 +2849,44 @@ static void setupTest(MachineFunction &MF) {
 			.addReg(X86::R15);
 		}
 
+		// record cycle counts
+		if (RecordTestCycleCounts) {
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RAX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RBX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RCX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RDX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::CPUID));
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::RDTSC));
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RDX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RCX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RBX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+		      .addReg(X86::RDI)
+		      .addImm(1)
+		      .addReg(0)
+		      .addImm(0x110ull)
+		      .addReg(0)
+		      .addReg(X86::RAX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RAX);
+		}
+
 		/* Insert the test insn, the original insn */
-		{
+		/* if recording cycle counts, insert the insn
+                   CycleCountMeasureAmortizationCount times. otherwise,
+                   probably testing correctness so just insert once. this
+                   is why the do ... while ... loop */
+		do {
 		    if (Op == "ADD64mr") {
 			changedOpcode = X86::ADD64mr;
-			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr), X86::RSI)
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr), X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
@@ -2855,38 +2897,38 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "PUSH64i8") {
 			changedOpcode = X86::PUSH64i8;
 			
-			BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64i8))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64i8))
 			    .addImm(128);
-			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 			    .addReg(X86::RAX);
 		    }
 
 		    else if (Op == "PUSH64rmm") {
 			changedOpcode = X86::PUSH64rmm;
 			
-			BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64rmm))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64rmm))
 			    .addReg(X86::RDX)
 			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
 			    .addReg(0);
-			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 			    .addReg(X86::RAX);
 		    }
 
 		    else if (Op == "PUSH64r") {
 			changedOpcode = X86::PUSH64r;
 			
-			BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 			    .addReg(X86::RSI);
-			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 			    .addReg(X86::RAX);
 		    }
 
 		    else if (Op == "AND32mr") {
 			changedOpcode = X86::AND32mr;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::AND32mr))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND32mr))
 			    .addReg(X86::RSI)
 			    .addImm(0)
 			    .addReg(0)
@@ -2898,7 +2940,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "AND8mi") {
 			changedOpcode = X86::AND8mi;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::AND8mi))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND8mi))
 			    .addReg(X86::RSI)
 			    .addImm(0)
 			    .addReg(0)
@@ -2908,7 +2950,7 @@ static void setupTest(MachineFunction &MF) {
 		    }
 		    else if (Op == "XOR64mr") {
 			changedOpcode = X86::XOR64mr;
-			BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64mr), X86::RSI)
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64mr), X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
@@ -2918,7 +2960,7 @@ static void setupTest(MachineFunction &MF) {
 
 		    else if (Op == "ADD64mi32") {
 			changedOpcode = X86::ADD64mi32;
-			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi32), X86::RSI)
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi32), X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
@@ -2929,7 +2971,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "ADD64mi8") {
 			changedOpcode = X86::ADD64mi8;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi8), X86::RSI)
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi8), X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
@@ -2940,7 +2982,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "ADD32mi8") {
 			changedOpcode = X86::ADD32mi8;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mi8), X86::RSI)
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mi8), X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
@@ -2950,7 +2992,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "ADD32mr") {
 			changedOpcode = X86::ADD32mr;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mr))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mr))
 			    .addReg(X86::RSI)
 			    .addImm(0)
 			    .addReg(0)
@@ -2961,7 +3003,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "ADD8mr") {
 			changedOpcode = X86::ADD8mr;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8mr))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8mr))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -2972,7 +3014,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "MOV8mr_NOREX") {
 			changedOpcode = X86::MOV8mr_NOREX;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr_NOREX))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr_NOREX))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -2983,7 +3025,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "MOV8mr") {
 			changedOpcode = X86::MOV8mr;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -2994,7 +3036,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "MOV8mi") {
 			changedOpcode = X86::MOV8mi;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mi))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mi))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -3005,7 +3047,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "MOV16mr") {
 			changedOpcode = X86::MOV16mr;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV16mr))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV16mr))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -3017,7 +3059,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "MOV16mi") {
 			changedOpcode = X86::MOV16mi;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV16mi))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV16mi))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -3029,7 +3071,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "MOV32mr") {
 			changedOpcode = X86::MOV32mr;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mr))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mr))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -3041,7 +3083,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "MOV32mi") {
 			changedOpcode = X86::MOV32mi;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mi))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mi))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -3053,7 +3095,7 @@ static void setupTest(MachineFunction &MF) {
 		    else if (Op == "MOVPDI2DImr") {
 			changedOpcode = X86::MOVPDI2DImr;
 
-			BuildMI(*MBB, &MI, DL, TII->get(X86::MOVPDI2DImr))
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVPDI2DImr))
 			    .addReg(X86::RSI)
 			    .addImm(1)
 			    .addReg(0)
@@ -3061,6 +3103,56 @@ static void setupTest(MachineFunction &MF) {
 			    .addReg(0)
 			    .addReg(X86::XMM0);
 		    }
+
+		    if (nullptr != AddedMI) {
+		       AddedMI->NeedsTransforming = true;
+		    }
+	    
+		    AmortizeCount += 1;
+		}
+		while (RecordTestCycleCounts &&
+		       AmortizeCount < CycleCountMeasureAmortizationCount);
+
+		if (RecordTestCycleCounts) {
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RAX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RBX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RCX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RDX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::RDTSCP));
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr))
+			.addReg(X86::R11)
+			.addReg(X86::RAX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::CPUID));
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rm))
+			.addReg(X86::R10)
+			.addReg(X86::RDI)
+			.addImm(1)
+			.addReg(0)
+			.addImm(0x110ull)
+			.addReg(0);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32rr), X86::R11D)
+			.addReg(X86::R11D)
+			.addReg(X86::R10D);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+		      .addReg(X86::RDI)
+		      .addImm(1)
+		      .addReg(0)
+		      .addImm(0x110ull)
+		      .addReg(0)
+		      .addReg(X86::R11);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RDX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RCX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RBX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RAX);
 		}
 
 		/* insert restores of r12-15. pushed r12, r13, r14, 15 */
@@ -3256,12 +3348,13 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
       std::vector<MachineInstr *> MIs;
       for (auto &MBB : MF) {
         for (auto &MI : MBB) {
-	    if (MI.getOpcode() == changedOpcode && changedOpcode == X86::PUSH64r) {
+	    if (MI.getOpcode() == changedOpcode &&
+	          changedOpcode == X86::PUSH64r) {
 		MCRegister Src64 = MI.getOperand(0).getReg().asMCReg();
 		if (Src64 == X86::RSI) {
 		    this->doX86SilentStoreHardening(MI, MBB, MF, Remove);
 		}
-	    } else if (MI.getOpcode() == changedOpcode) {
+	    } else if (MI.NeedsTransforming) {
 	      this->doX86SilentStoreHardening(MI, MBB, MF, Remove);
 	  }
         }

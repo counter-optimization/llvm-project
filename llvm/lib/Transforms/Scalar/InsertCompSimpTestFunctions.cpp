@@ -88,6 +88,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "IMUL64rri32", "IMUL64rmi32",
       "LEA64_32r", "TEST8mi", "PADDDrr", "PADDDrm", "PADDQrr",
       "PADDQrm",
+      "VPCOMPRESSBZ256rrkz", /* null test name, generates an empty test */
   };
   
   std::vector<std::string> SSInsts{
