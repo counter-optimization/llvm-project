@@ -2792,7 +2792,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     break;
   }
   default: {
-    errs() << "Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
+    errs() << "[SS] Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
     OpcodeSupported = false;
     // assert(false && "Unsupported opcode in X86SilentStoreHardening");
     break;
