@@ -3102,8 +3102,17 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addReg(X86::DL);
-		    }
-		    else if (Op == "MOV8mr") {
+		    } else if (Op == "MOV8mr_HIGHBYTE") {
+			changedOpcode = X86::MOV8mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::AH); // one of AH,BH,CH,DH
+		    } else if (Op == "MOV8mr") {
 			changedOpcode = X86::MOV8mr;
 
 			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))

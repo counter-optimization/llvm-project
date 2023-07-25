@@ -74,7 +74,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
        benchmarks as empty test case*/
   std::vector<std::string> CSInsts{
       "ADD64ri8",  "ADD64ri32", "ADD64i32",
-      "ADD64rm",   "ADD64rr",   "AND8ri",    "AND8i8",    "AND64rm"
+      "ADD64rm",   "ADD64rr",   "AND8ri",    "AND8i8",    "AND64rm",
       "ADD32rr",   "ADD32ri8",  "ADD32ri",   "ADD32i32",
       "ADD8rm",    "AND64rr",   "AND64i32",  "AND64ri32", "ADD8ri",
       "AND64ri8",  "AND32rr",   "AND32ri8",  "AND32ri",   "AND32i32",
@@ -95,7 +95,13 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "PADDQrm",
       "VPCOMPRESSBZ256rrkz", /* null test name, generates an empty test */
   };
-  
+
+  /* MOV8mr_HIGHBYTE does not correspond to an actual insn,
+     but tests that our transform handles MOV8mr where the 
+     register src operand is the high byte of a 16bit sub register
+     (i.e., AH, BH, CH, or DH). these have to be handled specially
+     since you cannot mix REX-encoded insns--which include any that
+     use r10-r15 registers--with AH,BH,CH,DH) */
   std::vector<std::string> SSInsts{
       "ADD64mr", "XOR64mr", "ADD64mi32", "ADD32mi8", "ADD64mi8",
       "MOV8mr_NOREX", "MOV8mr", "MOV8mi", "ADD8mr", "ADD32mr",
@@ -103,6 +109,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "MOV32mr", "MOV32mi", "MOV16mr", "MOV16mi", "MOVPDI2DImr",
       "MOV64mi32", "MOV64mr", "PUSH64i32", "MOVAPSmr", "MOVDQAmr",
       "MOVUPSmr", "MOVDQUmr",
+      "MOV8mr_HIGHBYTE", 
   };
   
   for (auto S : CSInsts) {
