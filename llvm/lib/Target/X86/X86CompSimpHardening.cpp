@@ -5434,13 +5434,14 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64Before(MachineInstr *MI) {
   assert(MOp1.isReg() && "Op1 is a reg");
   assert(MOp2.isReg() && "Op2 is a reg");
 
-  auto Op3 = MOp1.getReg();
-  auto Op4 = MOp2.getReg();
+  auto Op3 = MOp1.getReg().asMCReg();
+  auto Op4 = MOp2.getReg().asMCReg();
 
-  // copy Op4 to R13
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R13).addReg(Op4);
-
-  Op4 = X86::R13;
+  if (Op3 == Op4) {
+     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10)
+         .addReg(Op4);
+     Op4 = X86::R10;
+  }
 
   auto Op4_8 = TRI->getSubReg(Op4, 1);
   auto Op3_8 = TRI->getSubReg(MOp1.getReg(), 1);
@@ -5456,9 +5457,6 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W).addReg(Op3_16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op3_16).addImm(0x1);
 
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12).addReg(X86::RAX);
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::LAHF));
-
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R11)
       .addReg(X86::R11)
       .addImm(16);
@@ -5468,24 +5466,14 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64Before(MachineInstr *MI) {
 
   Register Op4R = Op4;
   Register Op3R = Op3;
-  // if (Op1R == X86::RAX)
-  //     Op1R = X86::R12;
-  // if (Op2R == X86::RAX)
-  //     Op2R = X86::R12;
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op4R).addReg(Op4R).addImm(16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op3R).addReg(Op3R).addImm(16);
-
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::SAHF));
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R12);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::ADC32rr), X86::R12D)
       .addReg(X86::R12D)
       .addReg(X86::R11D);
   BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), Op3).addReg(Op3).addReg(Op4);
-
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12).addReg(X86::RAX);
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::LAHF));
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R12)
       .addReg(X86::R12)
@@ -5495,9 +5483,6 @@ void X86_64CompSimpMitigationPass::insertSafeAdc64Before(MachineInstr *MI) {
       .addReg(X86::R11)
       .addImm(16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::RCL64ri), Op3R).addReg(Op3R).addImm(16);
-
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::SAHF));
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R12);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op3_16).addReg(X86::R12W);
 
@@ -8218,15 +8203,16 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64Before(MachineInstr *MI) {
   auto Op3 = MOp1.getReg();
   auto Op4 = MOp2.getReg();
 
-  // copy Op4 to R13 
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R13).addReg(Op4);
-
-  Op4 = X86::R13;
+  if (Op3 == Op4) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	  .addReg(Op4);
+      Op4 = X86::R10;
+  }
 
   auto Op4_8 = TRI->getSubReg(Op4, 1);
-  auto Op3_8 = TRI->getSubReg(MOp1.getReg(), 1);
+  auto Op3_8 = TRI->getSubReg(Op3, 1);
   auto Op4_16 = TRI->getSubReg(Op4, 4);
-  auto Op3_16 = TRI->getSubReg(MOp1.getReg(), 4);
+  auto Op3_16 = TRI->getSubReg(Op3, 4);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R11).addImm(281474976710656);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W).addReg(Op4_16);
@@ -8234,9 +8220,6 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R12).addImm(281474976710656);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W).addReg(Op3_16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Op3_16).addImm(0x1);
-
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12).addReg(X86::RAX);
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::LAHF));
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), X86::R11)
       .addReg(X86::R11)
@@ -8247,24 +8230,14 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64Before(MachineInstr *MI) {
 
   Register Op4R = Op4;
   Register Op3R = Op3;
-  // if (Op1R == X86::RAX)
-  //     Op1R = X86::R12;
-  // if (Op2R == X86::RAX)
-  //     Op2R = X86::R12;
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op4R).addReg(Op4R).addImm(16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Op3R).addReg(Op3R).addImm(16);
-
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::SAHF));
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R12);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::ADD32rr), X86::R12D)
       .addReg(X86::R12D)
       .addReg(X86::R11D);
   BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), Op3).addReg(Op3).addReg(Op4);
-
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12).addReg(X86::RAX);
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::LAHF));
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), X86::R12)
       .addReg(X86::R12)
@@ -8274,9 +8247,6 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64Before(MachineInstr *MI) {
       .addReg(X86::R11)
       .addImm(16);
   BuildMI(*MBB, *MI, DL, TII->get(X86::RCL64ri), Op3R).addReg(Op3R).addImm(16);
-
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::SAHF));
-  // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R12);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op3_16).addReg(X86::R12W);
 
@@ -10532,24 +10502,24 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   ///// assert(false && "support shr8cl");
   ///// updateStats(MI, 75); MI->eraseFromParent();
   ///// }
-  case X86::MUL32r: {
-    insertSafeMul32rBefore(MI);
-    updateStats(MI, 76);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::MUL64r: {
-      insertSafeMul64rBefore(MI);
-      updateStats(MI, 125);
-      MI->eraseFromParent();
-      break;
-  }
-  case X86::MUL64m: {
-      insertSafeMul64rBefore(MI);
-      updateStats(MI, 32);
-      MI->eraseFromParent();
-      break;
-  }
+  // case X86::MUL32r: {
+  //   insertSafeMul32rBefore(MI);
+  //   updateStats(MI, 76);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
+  // case X86::MUL64r: {
+  //     insertSafeMul64rBefore(MI);
+  //     updateStats(MI, 125);
+  //     MI->eraseFromParent();
+  //     break;
+  // }
+  // case X86::MUL64m: {
+  //     insertSafeMul64rBefore(MI);
+  //     updateStats(MI, 32);
+  //     MI->eraseFromParent();
+  //     break;
+  // }
   case X86::CMP64rr: {
     insertSafeCmp64rrBefore(MI);
     updateStats(MI, 77);
@@ -10604,48 +10574,48 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   ///    MI->eraseFromParent();
   ///    break;
   ///  }
-  case X86::IMUL32rr: {
-    insertSafeIMul32rrBefore(MI);
-    updateStats(MI, 84);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::IMUL32rm: {
-    insertSafeIMul32rmBefore(MI);
-    updateStats(MI, 85);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::IMUL64rr: {
-    insertSafeIMul64rrBefore(MI);
-    updateStats(MI, 129);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::IMUL64rm: {
-    insertSafeIMul64rmBefore(MI);
-    updateStats(MI, 130);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::IMUL64rri8: {
-    insertSafeIMul64rri8Before(MI);
-    updateStats(MI, 131);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::IMUL64rri32: {
-    insertSafeIMul64rri32Before(MI);
-    updateStats(MI, 132);
-    MI->eraseFromParent();
-    break;
-  }
-  case X86::IMUL64rmi32: {
-    insertSafeIMul64rmi32Before(MI);
-    updateStats(MI, 133);
-    MI->eraseFromParent();
-    break;
-  }
+  // case X86::IMUL32rr: {
+  //   insertSafeIMul32rrBefore(MI);
+  //   updateStats(MI, 84);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
+  // case X86::IMUL32rm: {
+  //   insertSafeIMul32rmBefore(MI);
+  //   updateStats(MI, 85);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
+  // case X86::IMUL64rr: {
+  //   insertSafeIMul64rrBefore(MI);
+  //   updateStats(MI, 129);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
+  // case X86::IMUL64rm: {
+  //   insertSafeIMul64rmBefore(MI);
+  //   updateStats(MI, 130);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
+  // case X86::IMUL64rri8: {
+  //   insertSafeIMul64rri8Before(MI);
+  //   updateStats(MI, 131);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
+  // case X86::IMUL64rri32: {
+  //   insertSafeIMul64rri32Before(MI);
+  //   updateStats(MI, 132);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
+  // case X86::IMUL64rmi32: {
+  //   insertSafeIMul64rmi32Before(MI);
+  //   updateStats(MI, 133);
+  //   MI->eraseFromParent();
+  //   break;
+  // }
   default: {
     errs() << "[CS] Unsupported opcode: " << TII->getName(MI->getOpcode()) << '\n';
     break;

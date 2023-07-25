@@ -1631,9 +1631,12 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       // 	  .addReg(0)
       // 	  .addImm(-8)
       // 	  .addReg(0);
-      addOffset(
-	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
-	      .addReg(X86::RSP), -8);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0);
 
       BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R10B)
 	  .addImm(Imm8);
@@ -1659,7 +1662,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .addReg(X86::RSP)
 	  .addImm(1)
 	  .addReg(0)
-	  .addImm(0)
+	  .addImm(-8)
 	  .addReg(0);
 
       BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
