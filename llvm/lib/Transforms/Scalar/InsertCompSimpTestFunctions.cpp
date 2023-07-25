@@ -73,28 +73,34 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
        and ofc 'VPCOMPRESSBZ256rrkz' since it is used in our
        benchmarks as empty test case*/
   std::vector<std::string> CSInsts{
-      "ADD64ri8",  "ADD64ri32", "ADD64i32",
-      "ADD64rm",   "ADD64rr",   "AND8ri",    "AND8i8",    "AND64rm",
-      "ADD32rr",   "ADD32ri8",  "ADD32ri",   "ADD32i32",
-      "ADD8rm",    "AND64rr",   "AND64i32",  "AND64ri32", "ADD8ri",
-      "AND64ri8",  "AND32rr",   "AND32ri8",  "AND32ri",   "AND32i32",
-      "OR64rr",    "OR64rm",    "OR64ri8",   "OR32rr",    "OR32ri8",
-      "MUL64m",    "IMUL32rm",  "XOR64rr",   "XOR64rm",
-      "XOR32rr",   "XOR32rm",   "XOR32ri8",  "XOR8rr",
-      "XOR8rm",    "SUB64rr",   "SUB64rm",   "SUB32rr",   "TEST32rr",
-      "AND8rr",    "TEST8ri",   "TEST8i8",   "SHL8rCL",
-      "SHR8ri",    "SAR8ri",    "SHR32ri",   "SHR32r1",   "SHR64r1",
-      "SHL32rCL",  "SHL32ri",   "SAR64ri",   "SHR64ri",   "XOR32ri",
-      "SHL64ri",   "AND16rr",   "OR8rr",     "OR16rr",    "XOR16rr",
-      "SUB8rr",    "LEA64r",    "OR8ri",     "OR8i8",
-      "ADD32rm",   "SHR32rCL",  "MUL32r",
-      "CMP64rr",   "CMP64rm",   "CMP32rr",   "CMP32rm",
-      "CMP64mr",
-      "MUL64r",
-      "IMUL32rr",  "IMUL64rr",  "IMUL64rm",  "IMUL64rri8",
-      "IMUL64rri32", "IMUL64rmi32",
-      "LEA64_32r", "TEST8mi", "PADDDrr", "PADDDrm", "PADDQrr",
-      "PADDQrm",
+      "OR8i8",      "OR8ri",       "OR8rr",       "OR16rr",
+      "OR32rr",     "OR32ri8",     "OR64rr",      "OR64rm",    "OR64ri8",
+      "XOR8rr",     "XOR8rm",      "XOR16rr",
+      "XOR32rr",    "XOR32rm",     "XOR32ri",     "XOR32ri8",
+      "XOR64rr",    "XOR64rm",
+      "AND8rr",     "AND8i8",      "AND8ri",      "AND16rr",
+      "AND32rr",    "AND32ri",     "AND32ri8",     // "AND32i32", not implemented
+      "AND64rr",    "AND64rm",     "AND64i32",    "AND64ri32", "AND64ri8",
+      "TEST8ri",    "TEST8i8",     "TEST8mi",     "TEST32rr",
+      
+      "SHL8rCL",    "SHL32rCL",    "SHL32ri",     "SHL64ri",
+      "SHR8ri",     "SHR32rCL",    "SHR32ri",     "SHR32r1",
+      "SHR64r1",    "SHR64ri",
+      "SAR8ri",     "SAR64ri",
+
+      "SUB8rr",     "SUB32rr",     "SUB64rr",     "SUB64rm",
+      "ADD8rm",     "ADD8ri",
+      "ADD32rr",    "ADD32rm",     "ADD32i32",    "ADD32ri8",  "ADD32ri",
+      "ADD64rr",    "ADD64i32",    "ADD64ri8",    "ADD64ri32", "ADD64rm",
+   
+      "LEA64r",     "LEA64_32r",
+      "MUL32r",     "MUL64r",      "MUL64m",
+      "IMUL32rr",   "IMUL32rm",    "IMUL64rr",    "IMUL64rm",
+      "IMUL64rri8", "IMUL64rri32", "IMUL64rmi32",
+  
+      "CMP32rr",    "CMP32rm",     "CMP64rr",     "CMP64rm",   "CMP64mr"
+      
+      "PADDDrr",    "PADDDrm",     "PADDQrr",     "PADDQrm",
       "VPCOMPRESSBZ256rrkz", /* null test name, generates an empty test */
   };
 
