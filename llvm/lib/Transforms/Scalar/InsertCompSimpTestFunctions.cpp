@@ -74,7 +74,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
        benchmarks as empty test case*/
   std::vector<std::string> CSInsts{
       "ADD64ri8",  "ADD64ri32", "ADD64i32",
-      "ADD64rm",   "ADD64rr",   "AND8ri",    "AND64rm",
+      "ADD64rm",   "ADD64rr",   "AND8ri",    "AND8i8",    "AND64rm"
       "ADD32rr",   "ADD32ri8",  "ADD32ri",   "ADD32i32",
       "ADD8rm",    "AND64rr",   "AND64i32",  "AND64ri32", "ADD8ri",
       "AND64ri8",  "AND32rr",   "AND32ri8",  "AND32ri",   "AND32i32",

@@ -124,7 +124,8 @@ private:
   void insertSafeXor64rmBefore(MachineInstr *MI);
   void insertSafeXor64mrBefore(MachineInstr *MI);
   void insertSafeAnd8Before(MachineInstr *MI);
-    void insertSafeAnd8riBefore(MachineInstr* MI);
+  void insertSafeAnd8i8Before(MachineInstr* MI);
+  void insertSafeAnd8riBefore(MachineInstr* MI);
   void insertSafeTest8riBefore(MachineInstr *MI);
   void insertSafeTest8i8Before(MachineInstr *MI);
   void insertSafeTest8miBefore(MachineInstr *MI);
@@ -3513,6 +3514,32 @@ void X86_64CompSimpMitigationPass::insertSafeTest8riBefore(MachineInstr *MI) {
     BuildMI(*MBB, *MI, DL, TII->get(X86::AND64ri8), X86::R10)
 	.addReg(X86::R10)
 	.addImm(Imm8);
+}
+
+void X86_64CompSimpMitigationPass::insertSafeAnd8i8Before(MachineInstr* MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+
+    MCRegister Dst8 = X86::AL;
+    int64_t Imm8 = MI->getOperand(0).getImm();
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10)
+	.addImm(1ULL << 16ULL);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	.addReg(Dst8);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::AND64ri8), X86::R10)
+	.addReg(X86::R10)
+	.addImm(Imm8);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Dst8)
+	.addReg(X86::R10B);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAnd8riBefore(MachineInstr* MI)
@@ -10516,6 +10543,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
+  case X86::AND8i8: {
+      insertSafeAnd8i8Before(MI);
+      updateStats(MI, 135);
+      MI->eraseFromParent();
+      break;
+  }
   case X86::AND8ri: {
       insertSafeAnd8riBefore(MI);
       updateStats(MI, 119);
@@ -11418,6 +11451,10 @@ static void setupTest(MachineFunction &MF) {
 	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::TEST32rr))
 		  .addReg(X86::ESI)
 		  .addReg(X86::EDX);
+	    } else if (Op == "AND8i8") {
+		TestAddedOpcode = X86::AND8i8;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND8i8))
+		    .addImm(0x33);
 	    } else if (Op == "AND8ri") {
 		TestAddedOpcode = X86::AND8ri;
 		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND8ri), X86::SIL)
