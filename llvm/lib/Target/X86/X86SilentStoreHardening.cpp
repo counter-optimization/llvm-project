@@ -3134,9 +3134,18 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addImm(1ull << 25ull);
-		    }
+		    } else if (Op == "MOV64mr") {
+			changedOpcode = X86::MOV64mr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::RDX);
+			
 
-		    else if (Op == "MOV32mi") {
+		    } else if (Op == "MOV32mi") {
 			changedOpcode = X86::MOV32mi;
 
 			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mi))
