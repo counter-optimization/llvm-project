@@ -73,7 +73,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
        and ofc 'VPCOMPRESSBZ256rrkz' since it is used in our
        benchmarks as empty test case*/
   std::vector<std::string> CSInsts{
-      "ADD64ri8",  "ADD64ri32", 
+      "ADD64ri8",  "ADD64ri32", "ADD64i32",
       "ADD64rm",   "ADD64rr",   "AND8ri",    "AND64rm",
       "ADD32rr",   "ADD32ri8",  "ADD32ri",   "ADD32i32",
       "ADD8rm",    "AND64rr",   "AND64i32",  "AND64ri32", "ADD8ri",

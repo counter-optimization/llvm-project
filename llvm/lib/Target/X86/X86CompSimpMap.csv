@@ -132,3 +132,4 @@ Index, Instruction
 131, IMUL64rri8
 132, IMUL64rri32
 133, IMUL64rmi32
+134, ADD64i32

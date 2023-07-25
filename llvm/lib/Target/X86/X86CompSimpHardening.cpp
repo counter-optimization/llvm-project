@@ -174,6 +174,7 @@ private:
   void insertSafeLea64rBefore(MachineInstr *MI);
   void insertSafeAdd64ri8Before(MachineInstr *MI);
   void insertSafeAdc64ri8Before(MachineInstr *MI);
+  void insertSafeAdd64i32Before(MachineInstr *MI);
   void insertSafeAdd64ri32Before(MachineInstr *MI);
   void insertSafeAdd64mi32Before(MachineInstr *MI);
   void insertSafeAdd64mi8Before(MachineInstr *MI);
@@ -7462,6 +7463,93 @@ void X86_64CompSimpMitigationPass::insertSafeAdd64mi32Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr)).add(MOp1).add(MOp2).add(MOp3).add(MOp4).add(MOp5).addReg(Op3);
 }
 
+void
+X86_64CompSimpMitigationPass::insertSafeAdd64i32Before(MachineInstr *MI)
+{
+  MachineBasicBlock *MBB = MI->getParent();
+  MachineFunction *MF = MBB->getParent();
+  DebugLoc DL = MI->getDebugLoc();
+  const auto &STI = MF->getSubtarget();
+  auto *TII = STI.getInstrInfo();
+  auto *TRI = STI.getRegisterInfo();
+  auto &MRI = MF->getRegInfo();
+
+  auto Dest64 = X86::RAX;
+  auto Dest16 = X86::AX;
+
+  auto Imm = MI->getOperand(0).getImm();
+  auto Src64 = X86::R12;
+  auto Src16 = X86::R12W;
+  auto Src8 = X86::R12B;
+
+  auto Scratch1_64 = X86::R10;
+  auto Scratch1_32 = X86::R10D;
+  auto Scratch1_16 = X86::R10W;
+
+  auto Scratch2_64 = X86::R11;
+  auto Scratch2_32 = X86::R11D;
+  auto Scratch2_16 = X86::R11W;
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Src64).addImm(0);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64ri32), Src64)
+    .addReg(Src64)
+    .addImm(Imm);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 48ULL);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Scratch1_16).addReg(Dest16);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Dest16).addImm(1);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch2_64).addImm(1ULL << 48ULL);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Scratch2_16).addReg(Src16);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Src16).addImm(1);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Scratch1_64)
+    .addReg(Scratch1_64)
+    .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Scratch2_64)
+    .addReg(Scratch2_64)
+    .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Dest64)
+    .addReg(Dest64)
+    .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Src64)
+    .addReg(Src64)
+    .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ADD32rr), X86::R11D)
+    .addReg(Scratch1_32)
+    .addReg(Scratch2_32);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), Dest64)
+    .addReg(Dest64)
+    .addReg(Src64);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Scratch2_64)
+    .addReg(Scratch2_64)
+    .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Src64)
+    .addReg(Src64)
+    .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Scratch1_64)
+    .addReg(Scratch1_64)
+    .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::RCL64ri), Dest64)
+    .addReg(Dest64)
+    .addImm(16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Dest16).addReg(Scratch1_16);
+
+  BuildMI(*MBB, *MI, DL, TII->get(X86::SETCCr), Src8).addImm(2);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::CMP64ri8), Dest64).addImm(0x0);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8), Src8).addImm(0x0);
+}
+
 void X86_64CompSimpMitigationPass::insertSafeAdd64ri32Before(MachineInstr *MI) {
   /**
    *  addq rcx, imm32
@@ -10052,6 +10140,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
+  case X86::ADD64i32: {
+    insertSafeAdd64i32Before(MI);
+    updateStats(MI, 134);
+    MI->eraseFromParent();
+    break;
+  }
   case X86::ADD64ri8: {
     insertSafeAdd64ri8Before(MI);
     updateStats(MI, 1);
@@ -10929,6 +11023,11 @@ static void setupTest(MachineFunction &MF) {
 		    .addReg(X86::ESI)
 		    .addImm(1ULL << 7ULL);
 	    }
+	    else if (Op == "ADD64i32") {
+		TestAddedOpcode = X86::ADD64i32;
+	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64i32))
+		  .addImm(0x25);
+        }
 	    else if (Op == "ADD64ri32") {
 		TestAddedOpcode = X86::ADD64ri32;
 	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64ri32), X86::RSI)
