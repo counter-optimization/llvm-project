@@ -101,7 +101,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "MOV8mr_NOREX", "MOV8mr", "MOV8mi", "ADD8mr", "ADD32mr",
       "AND8mi", "AND32mr", "PUSH64i8", "PUSH64rmm", "PUSH64r",
       "MOV32mr", "MOV32mi", "MOV16mr", "MOV16mi", "MOVPDI2DImr",
-      "MOV64mi32", "MOV64mr", "PUSH64i32", "MOVAPSmr",
+      "MOV64mi32", "MOV64mr", "PUSH64i32", "MOVAPSmr", "MOVDQAmr"
   };
   
   for (auto S : CSInsts) {

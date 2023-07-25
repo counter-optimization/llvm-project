@@ -2940,6 +2940,15 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addReg(X86::XMM0);
+		    } else if (Op == "MOVDQAmr") {
+			changedOpcode = X86::MOVDQAmr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
 		    } else if (Op == "PUSH64i8") {
 			changedOpcode = X86::PUSH64i8;
 			
