@@ -2931,9 +2931,16 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addReg(X86::RDX);
-		    }
-
-		    else if (Op == "PUSH64i8") {
+		    } else if (Op == "MOVAPSmr") {
+			changedOpcode = X86::MOVAPSmr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVAPSmr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
+		    } else if (Op == "PUSH64i8") {
 			changedOpcode = X86::PUSH64i8;
 			
 			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64i8))
