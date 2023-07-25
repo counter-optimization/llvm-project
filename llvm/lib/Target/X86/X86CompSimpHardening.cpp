@@ -3593,19 +3593,22 @@ void X86_64CompSimpMitigationPass::insertSafeAnd8Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(Op1.isReg() && "Op1 is a reg");
-  assert(Op2.isReg() && "Op2 is a reg");
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+	  .addReg(Op2);
+      Op2 = X86::R12B;
+  }
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(pow(2, 16));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1.getReg());
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(Op2.getReg());
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1.getReg()).addReg(X86::R10B);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2.getReg()).addReg(X86::R11B);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1).addReg(X86::R10B);
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2).addReg(X86::R11B);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeXor8rmBefore(MachineInstr *MI) {
@@ -3689,15 +3692,15 @@ void X86_64CompSimpMitigationPass::insertSafeXor8Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(1);
-  MachineOperand MOp2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(MOp1.isReg() && "Op1 is a reg");
-  assert(MOp2.isReg() && "Op2 is a reg");
-
-  auto Op1 = MOp1.getReg();
-  auto Op2 = MOp2.getReg();
-
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+	  .addReg(Op2);
+      Op2 = X86::R12B;
+  }
+  
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B).addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
@@ -3794,6 +3797,12 @@ void X86_64CompSimpMitigationPass::insertSafeOr8Before(MachineInstr *MI) {
     MCRegister Dst8 = MI->getOperand(1).getReg().asMCReg();
     MCRegister Src8 = MI->getOperand(2).getReg().asMCReg();
 
+    if (Src8 == Dst8) {
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+		      .addReg(Src8);
+	Src8 = X86::R12B;
+    }
+
     int64_t TwoToTheSixteen = 1ULL << 16ULL;
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10)
@@ -3841,22 +3850,25 @@ void X86_64CompSimpMitigationPass::insertSafeOr16Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(Op1.isReg() && "Op1 is a reg");
-  assert(Op2.isReg() && "Op2 is a reg");
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+	  .addReg(Op2);
+      Op2 = X86::R12W;
+  }
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
-      .addReg(Op1.getReg());
+      .addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
-      .addReg(Op2.getReg());
+      .addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::OR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1.getReg())
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1)
       .addReg(X86::R10W);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2.getReg())
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2)
       .addReg(X86::R11W);
 }
 
@@ -3884,22 +3896,25 @@ void X86_64CompSimpMitigationPass::insertSafeAnd16Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(Op1.isReg() && "Op1 is a reg");
-  assert(Op2.isReg() && "Op2 is a reg");
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+	  .addReg(Op2);
+      Op2 = X86::R12W;
+  }
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
-      .addReg(Op1.getReg());
+      .addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
-      .addReg(Op2.getReg());
+      .addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::AND64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1.getReg())
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1)
       .addReg(X86::R10W);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2.getReg())
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2)
       .addReg(X86::R11W);
 }
 
@@ -3927,22 +3942,25 @@ void X86_64CompSimpMitigationPass::insertSafeXor16Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(Op1.isReg() && "Op1 is a reg");
-  assert(Op2.isReg() && "Op2 is a reg");
-
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+	  .addReg(Op2);
+      Op2 = X86::R12W;
+  }
+  
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R10W)
-      .addReg(Op1.getReg());
+      .addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11).addImm(pow(2, 16));
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R11W)
-      .addReg(Op2.getReg());
+      .addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1.getReg())
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op1)
       .addReg(X86::R10W);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2.getReg())
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), Op2)
       .addReg(X86::R11W);
 }
 
@@ -4095,14 +4113,14 @@ void X86_64CompSimpMitigationPass::insertSafeXor64Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(1);
-  MachineOperand MOp2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(MOp1.isReg() && "Op1 is a reg");
-  assert(MOp2.isReg() && "Op2 is a reg");
-
-  auto Op1 = MOp1.getReg();
-  auto Op2 = MOp2.getReg();
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	  .addReg(Op2);
+      Op2 = X86::R12;
+  }
 
   auto Op1_16 = TRI->getSubReg(Op1, 4);
   auto Op2_16 = TRI->getSubReg(Op2, 4);
@@ -4298,16 +4316,15 @@ void X86_64CompSimpMitigationPass::insertSafeXor32Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(1);
-  MachineOperand MOp2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(MOp1.isReg() && "Op1 is a reg");
-  assert(MOp2.isReg() && "Op2 is a reg");
-
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R12D)
+	  .addReg(Op2);
+      Op2 = X86::R12D;
+  }
   
-  auto Op1 = MOp1.getReg();
-  auto Op2 = MOp2.getReg();
-
   // BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10D).addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(Op2);
 
@@ -4482,14 +4499,14 @@ void X86_64CompSimpMitigationPass::insertSafeOr64Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(1);
-  MachineOperand MOp2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(MOp1.isReg() && "Op1 is a reg");
-  assert(MOp2.isReg() && "Op2 is a reg");
-
-  auto Op1 = MOp1.getReg();
-  auto Op2 = MOp2.getReg();
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	  .addReg(Op2);
+      Op2 = X86::R10;
+  }
 
   auto Op1_16 = TRI->getSubReg(Op1, 4);
   auto Op2_16 = TRI->getSubReg(Op2, 4);
@@ -4598,14 +4615,14 @@ void X86_64CompSimpMitigationPass::insertSafeOr32Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand MOp1 = MI->getOperand(1);
-  MachineOperand MOp2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(MOp1.isReg() && "Op1 is a reg");
-  assert(MOp2.isReg() && "Op2 is a reg");
-
-  auto Op1 = MOp1.getReg();
-  auto Op2 = MOp2.getReg();
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R10D)
+	  .addReg(Op2);
+      Op2 = X86::R10D;
+  }
 
   auto Op2_64 =
       TRI->getMatchingSuperReg(Op2, X86::sub_32bit, &X86::GR64RegClass);
@@ -4694,10 +4711,18 @@ void X86_64CompSimpMitigationPass::insertSafeAnd32Before(MachineInstr *MI) {
     auto &MRI = MF->getRegInfo();
 
     auto Dst32 = MI->getOperand(0).getReg().asMCReg();
+    auto Src32 = MI->getOperand(2).getReg().asMCReg();
+
+    if (Src32 == Dst32) {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R12D)
+	    .addReg(Src32);
+	Src32 = X86::R12D;
+    }
+    
     auto Dst64 = TRI->getMatchingSuperReg(Dst32, X86::sub_32bit,
 					  &X86::GR64RegClass);
 
-    auto Src32 = MI->getOperand(2).getReg().asMCReg();
+    
     auto Src64 = TRI->getMatchingSuperReg(Src32, X86::sub_32bit,
 					  &X86::GR64RegClass);
 
@@ -5211,9 +5236,15 @@ void X86_64CompSimpMitigationPass::insertSafeAnd64Before(MachineInstr *MI) {
     auto &MRI = MF->getRegInfo();
 
     auto Dst64 = MI->getOperand(0).getReg().asMCReg();
-    auto Dst16 = TRI->getSubReg(Dst64, X86::sub_16bit);
-    
     auto Src64 = MI->getOperand(2).getReg().asMCReg();
+
+    if (Dst64 == Src64) {
+	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	    .addReg(Src64);
+	Src64 = X86::R12;
+    }
+    
+    auto Dst16 = TRI->getSubReg(Dst64, X86::sub_16bit);
     auto Src16 = TRI->getSubReg(Src64, X86::sub_16bit);
 
     auto r10 = X86::R10;
@@ -9248,6 +9279,12 @@ void X86_64CompSimpMitigationPass::insertSafeAdd32Before(MachineInstr *MI) {
   auto R1 = Op1.getReg();
   auto R2 = Op2.getReg();
 
+  if (R1 == R2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R12D)
+	  .add(Op2);
+      R2 = X86::R12D;
+  }
+
   auto Op2_64 =
       TRI->getMatchingSuperReg(R2, X86::sub_32bit, &X86::GR64RegClass);
   auto Op1_64 =
@@ -9663,6 +9700,12 @@ void X86_64CompSimpMitigationPass::insertSafeSub8rrBefore(MachineInstr *MI) {
     MCRegister Dst8 = MI->getOperand(1).getReg().asMCReg();
     MCRegister Src8 = MI->getOperand(2).getReg().asMCReg();
 
+    if (Dst8 == Src8) {
+       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+           .addReg(Src8);
+       Src8 = X86::R12B;
+    }
+
     // Load Src8 into R10B with high bit set
     {
 	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R10D)
@@ -9766,20 +9809,23 @@ void X86_64CompSimpMitigationPass::insertSafeSub32Before(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
-  MachineOperand Op1 = MI->getOperand(1);
-  MachineOperand Op2 = MI->getOperand(2);
+  auto Op1 = MI->getOperand(1).getReg();
+  auto Op2 = MI->getOperand(2).getReg();
 
-  assert(Op1.isReg() && "Op1 is a reg");
-  assert(Op2.isReg() && "Op2 is a reg");
-
-  auto Op2_64 = TRI->getMatchingSuperReg(Op2.getReg(), X86::sub_32bit,
+  if (Op1 == Op2) {
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::R12D)
+	  .addReg(Op2);
+      Op2 = X86::R12D;
+  }
+  
+  auto Op2_64 = TRI->getMatchingSuperReg(Op2, X86::sub_32bit,
                                          &X86::GR64RegClass);
-  auto Op1_64 = TRI->getMatchingSuperReg(Op1.getReg(), X86::sub_32bit,
+  auto Op1_64 = TRI->getMatchingSuperReg(Op1, X86::sub_32bit,
                                          &X86::GR64RegClass);
 
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11).addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op2.getReg())
-      .addReg(Op2.getReg());
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op2)
+      .addReg(Op2);
   BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Op2_64)
       .addReg(Op2_64)
       .addImm(pow(2, 31));
@@ -9789,8 +9835,8 @@ void X86_64CompSimpMitigationPass::insertSafeSub32Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Op1_64)
       .addReg(Op1_64)
       .addReg(Op2_64);
-  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op1.getReg())
-      .addReg(Op1.getReg());
+  BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Op1)
+      .addReg(Op1);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Op2_64).addReg(X86::R11);
 }
 
