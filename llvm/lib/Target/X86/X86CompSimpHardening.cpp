@@ -56,11 +56,14 @@ static cl::opt<bool> RecordTestCycleCounts(
 auto TestAddedOpcode = X86::VPCOMPRESSBZ256rrkz;
 
 namespace {
-class X86_64CompSimpMitigationPass : public MachineFunctionPass {
+
+   class X86_64CompSimpMitigationPass : public MachineFunctionPass {
 public:
   static char ID;
 
-  X86_64CompSimpMitigationPass() : MachineFunctionPass(ID) {}
+       X86_64CompSimpMitigationPass() : MachineFunctionPass(ID) {
+	   CsvLinesRead = 0;
+       }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
@@ -97,6 +100,7 @@ private:
       ExpectedOpcodeNames;
   inline static std::set<std::string> FunctionsToInstrument;
   inline static std::set<std::string> FunctionsInstrumented;
+       inline static unsigned long CsvLinesRead;
 
   void doX86CompSimpHardening(MachineInstr *MI, MachineFunction& MF);
   void subFallBack(MachineInstr *MI);
@@ -218,7 +222,7 @@ private:
   void insertSafeAdd64RR(MachineInstr *MI, MachineOperand *Op1,
                          MachineOperand *Op2);
   void readCheckerAlertCSV(const std::string &Filename);
-  
+
   struct CheckerAlertCSVLine {
     std::string SubName{};
     std::string OpcodeName{};
@@ -238,6 +242,7 @@ private:
     }
 
     explicit CheckerAlertCSVLine(const std::string &Line) {
+      CsvLinesRead += 1;
       std::istringstream StrReader(Line);
 
       // The row so far
@@ -354,82 +359,96 @@ bool X86_64CompSimpMitigationPass::isRelevantCheckerAlertCSVLine(
 void X86_64CompSimpMitigationPass::readCheckerAlertCSV(
     const std::string &Filename) {
 
-  std::ifstream IFS(Filename);
+    std::ifstream IFS(Filename, std::ios_base::ate | std::ios_base::in);
 
-  if (!IFS.is_open()) {
-    /* errs() << "Couldn't open file " << Filename << " from checker.\n"; */
-    assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
-  }
-
-  constexpr size_t MaxLineSize = 1024;
-  std::array<char, MaxLineSize> Line{0};
-  std::string ExpectedHeader("subroutine_name,"
-                             "mir_opcode,"
-                             "addr,"
-                             "rpo_idx,"
-                             "tid,"
-                             "problematic_operands,"
-                             "left_operand,"
-                             "right_operand,"
-                             "live_flags,"
-                             "is_live,"
-                             "alert_reason,"
-                             "description,"
-                             "flags_live_in");
-  bool IsHeader = true;
-
-  // operator bool() on the returned this* from .getline returns
-  // false. i think it returns false when EOF is hit?
-  // -1 for null terminator
-  while (IFS.getline(Line.data(), MaxLineSize - 1)) {
-    std::string CurrentLine(Line.data());
-
-    if (IsHeader) {
-      assert(ExpectedHeader == CurrentLine &&
-             "Unexpected header in checker alert csv file");
-      IsHeader = false;
-    } else {
-      CheckerAlertCSVLine CSVLine(CurrentLine);
-
-      if (this->isRelevantCheckerAlertCSVLine(CSVLine)) {
-        this->RelevantCSVLines.push_back(CSVLine);
-
-        const std::string &SubName = CSVLine.SubName;
-        const std::string &OpcodeName = CSVLine.OpcodeName;
-        int InsnIdx = CSVLine.InsnIdx;
-
-        FunctionsToInstrument.insert(CSVLine.SubName);
-
-        /* add map of (SubName, InsnIdx) -> ExpectedOpcodeNameString for faster
-         * checking later */
-        std::pair<std::string, int> NameIdxPair =
-            std::pair<std::string, int>(SubName, InsnIdx);
-        auto ExpectedIter = ExpectedOpcodeNames.find(NameIdxPair);
-        if (ExpectedIter != ExpectedOpcodeNames.end() &&
-            ExpectedIter->second != OpcodeName) {
-          errs() << "Duplicate subname, idx pair with differing opcodes: "
-                 << NameIdxPair.first << ", " << NameIdxPair.second
-                 << " differs on opcodes " << ExpectedIter->second << " and "
-                 << OpcodeName << '\n';
-          /* assert(ExpectedIter == ExpectedOpcodeNames.end() && */
-          /*        "Duplicate subname, idx pair in hardening pass"); */
-        }
-        ExpectedOpcodeNames.insert({NameIdxPair, OpcodeName});
-
-        auto IdxIter = IndicesToInstrument.find(SubName);
-        if (IdxIter == IndicesToInstrument.end()) {
-          std::set<int> FreshSet{};
-          FreshSet.insert(InsnIdx);
-          IndicesToInstrument[SubName] = FreshSet;
-        } else {
-          std::set<int> &Indices = IdxIter->second;
-          Indices.insert(InsnIdx);
-        }
-      }
+    if (!IFS.is_open()) {
+	/* errs() << "Couldn't open file " << Filename << " from checker.\n"; */
+	assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
     }
 
-    Line.fill(0);
-  }
+    auto NumCharsInFile = IFS.tellg();
+    IFS.seekg(std::ios_base::beg);
+
+    std::vector<char> Bytes(NumCharsInFile);
+    IFS.read(Bytes.data(), NumCharsInFile);
+
+    std::string FileContents(Bytes.begin(), Bytes.end());
+
+    const std::string ExpectedHeader("subroutine_name,"
+				     "mir_opcode,"
+				     "addr,"
+				     "rpo_idx,"
+				     "tid,"
+				     "problematic_operands,"
+				     "left_operand,"
+				     "right_operand,"
+				     "live_flags,"
+				     "is_live,"
+				     "alert_reason,"
+				     "description,"
+				     "flags_live_in");
+    bool IsHeader = true;
+    auto CurLineStart = FileContents.begin();
+    auto NewLine = std::find(FileContents.begin(),
+			     FileContents.end(),
+			     '\n');
+
+    while (true) {
+	std::string CurrentLine(CurLineStart, NewLine);
+	
+	if (IsHeader) {
+	    assert(ExpectedHeader == CurrentLine &&
+		   "Unexpected header in checker alert csv file");
+	    IsHeader = false;
+	} else {
+	    CheckerAlertCSVLine CSVLine(CurrentLine);
+
+	    if (this->isRelevantCheckerAlertCSVLine(CSVLine)) {
+		this->RelevantCSVLines.push_back(CSVLine);
+
+		const std::string &SubName = CSVLine.SubName;
+		const std::string &OpcodeName = CSVLine.OpcodeName;
+		int InsnIdx = CSVLine.InsnIdx;
+
+		FunctionsToInstrument.insert(CSVLine.SubName);
+
+		/* add map of (SubName, InsnIdx) -> ExpectedOpcodeNameString for faster
+		 * checking later */
+		std::pair<std::string, int> NameIdxPair =
+		    std::pair<std::string, int>(SubName, InsnIdx);
+		auto ExpectedIter = ExpectedOpcodeNames.find(NameIdxPair);
+		if (ExpectedIter != ExpectedOpcodeNames.end() &&
+		    ExpectedIter->second != OpcodeName) {
+		    errs() << "Duplicate subname, idx pair with differing opcodes: "
+			   << NameIdxPair.first << ", " << NameIdxPair.second
+			   << " differs on opcodes " << ExpectedIter->second << " and "
+			   << OpcodeName << '\n';
+		    /* assert(ExpectedIter == ExpectedOpcodeNames.end() && */
+		    /*        "Duplicate subname, idx pair in hardening pass"); */
+		}
+		ExpectedOpcodeNames.insert({NameIdxPair, OpcodeName});
+
+		auto IdxIter = IndicesToInstrument.find(SubName);
+		if (IdxIter == IndicesToInstrument.end()) {
+		    std::set<int> FreshSet{};
+		    FreshSet.insert(InsnIdx);
+		    IndicesToInstrument[SubName] = FreshSet;
+		} else {
+		    std::set<int> &Indices = IdxIter->second;
+		    Indices.insert(InsnIdx);
+		}
+	    }
+	}
+	
+	if (NewLine == std::end(FileContents) ||
+	    NewLine == std::end(FileContents) - 1) {
+	    break;
+	}
+	CurLineStart = NewLine + 1;
+	NewLine = std::find(CurLineStart,
+			    FileContents.end(),
+			    '\n');
+    }
 }
 
 Register get64BitReg(MachineOperand *MO, const TargetRegisterInfo *TRI) {}
@@ -8371,7 +8390,7 @@ X86_64CompSimpMitigationPass::insertSafeCmp64mrBefore(MachineInstr* MI)
     MachineOperand& Segment = MI->getOperand(4);
 
     MCRegister Src64 = MI->getOperand(5).getReg().asMCReg();
-    MCRegister Src16 = TRI->getSubReg(Src16, X86::sub_16bit);
+    MCRegister Src16 = TRI->getSubReg(Src64, X86::sub_16bit);
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
 	.add(Base)
@@ -11795,11 +11814,13 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
     CSVFileAlreadyParsed = true;
   }
 
+  std::string SubName = MF.getName().str();
+
   if (!shouldRunOnMachineFunction(MF)) {
+      errs() << "[CS] Skipping running on " << SubName << '\n';
     return false; // Doesn't modify the func if not running
   }
-
-  std::string SubName = MF.getName().str();
+  
   bool SameSymbolNameAlreadyInstrumented =
       FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
   if (SameSymbolNameAlreadyInstrumented) {
@@ -11814,30 +11835,6 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
 
   const auto &STI = MF.getSubtarget();
   auto *TII = STI.getInstrInfo();
-
-  /* insert R12-R15 push and pops to conform to ABI: these are callee-saved */
-  // auto first_bb = MF.begin();
-  // auto first_mi = first_bb->begin();
-  // auto last_bb = --MF.end();
-  // auto last_mi = --last_bb->end();
-  // /* pushes */
-  // BuildMI(*first_bb, *first_mi, first_mi->getDebugLoc(), TII->get(X86::PUSH64r))
-  //     .addReg(X86::R12);
-  // BuildMI(*first_bb, *first_mi, first_mi->getDebugLoc(), TII->get(X86::PUSH64r))
-  //     .addReg(X86::R13);
-  // BuildMI(*first_bb, *first_mi, first_mi->getDebugLoc(), TII->get(X86::PUSH64r))
-  //     .addReg(X86::R14);
-  // BuildMI(*first_bb, *first_mi, first_mi->getDebugLoc(), TII->get(X86::PUSH64r))
-  //     .addReg(X86::R15);
-  // /* pops */
-  // BuildMI(*last_bb, *last_mi, last_mi->getDebugLoc(), TII->get(X86::POP64r))
-  //     .addReg(X86::R15);
-  // BuildMI(*last_bb, *last_mi, last_mi->getDebugLoc(), TII->get(X86::POP64r))
-  //     .addReg(X86::R14);
-  // BuildMI(*last_bb, *last_mi, last_mi->getDebugLoc(), TII->get(X86::POP64r))
-  //     .addReg(X86::R13);
-  // BuildMI(*last_bb, *last_mi, last_mi->getDebugLoc(), TII->get(X86::POP64r))
-  //     .addReg(X86::R12);
 
   std::vector<MachineInstr *> Instructions;
   for (auto &MBB : MF) {
@@ -11871,41 +11868,41 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
           assert(Iter != ExpectedOpcodeNames.end());
           const std::string &ExpectedOpcode = Iter->second;
 
-          // If there was a mismatch, then find the originating checker
-          // alert CSV row and print it out compared to this insn.
-          bool SameOpcode = false;
-          if (CurOpcodeName == "ADD8ri" && ExpectedOpcode == "ADD8i8") {
-            SameOpcode = true;
-          }
-          if (CurOpcodeName == "XOR8ri" && ExpectedOpcode == "XOR8i8") {
-            SameOpcode = true;
-          }
-          if (CurOpcodeName == "AND32ri" && ExpectedOpcode == "AND32i32") {
-            SameOpcode = true;
-          }
-          // support add32ri
-          if (CurOpcodeName == "ADD32ri" && ExpectedOpcode == "ADD32i32") {
-            SameOpcode = true;
-          }
-          if (CurOpcodeName == "AND64ri32" && ExpectedOpcode == "AND64i32") {
-            SameOpcode = true;
-          }
-          if (CurOpcodeName == "ADD64ri32" && ExpectedOpcode == "ADD64i32") {
-            SameOpcode = true;
-          }
-          if (CurOpcodeName == "AND8ri" && ExpectedOpcode == "AND8i8") {
-            SameOpcode = true;
-          }
-          // support or8ri
-          if (CurOpcodeName == "OR8ri" && ExpectedOpcode == "OR8i8") {
-            SameOpcode = true;
-          }
-          // support test8ri
-          if (CurOpcodeName == "TEST8ri" && ExpectedOpcode == "TEST8i8") {
-            SameOpcode = true;
-          }
+          // // If there was a mismatch, then find the originating checker
+          // // alert CSV row and print it out compared to this insn.
+          // bool SameOpcode = false;
+          // if (CurOpcodeName == "ADD8ri" && ExpectedOpcode == "ADD8i8") {
+          //   SameOpcode = true;
+          // }
+          // if (CurOpcodeName == "XOR8ri" && ExpectedOpcode == "XOR8i8") {
+          //   SameOpcode = true;
+          // }
+          // if (CurOpcodeName == "AND32ri" && ExpectedOpcode == "AND32i32") {
+          //   SameOpcode = true;
+          // }
+          // // support add32ri
+          // if (CurOpcodeName == "ADD32ri" && ExpectedOpcode == "ADD32i32") {
+          //   SameOpcode = true;
+          // }
+          // if (CurOpcodeName == "AND64ri32" && ExpectedOpcode == "AND64i32") {
+          //   SameOpcode = true;
+          // }
+          // if (CurOpcodeName == "ADD64ri32" && ExpectedOpcode == "ADD64i32") {
+          //   SameOpcode = true;
+          // }
+          // if (CurOpcodeName == "AND8ri" && ExpectedOpcode == "AND8i8") {
+          //   SameOpcode = true;
+          // }
+          // // support or8ri
+          // if (CurOpcodeName == "OR8ri" && ExpectedOpcode == "OR8i8") {
+          //   SameOpcode = true;
+          // }
+          // // support test8ri
+          // if (CurOpcodeName == "TEST8ri" && ExpectedOpcode == "TEST8i8") {
+          //   SameOpcode = true;
+          // }
           
-          if (!SameOpcode && CurOpcodeName.find(ExpectedOpcode) == std::string::npos) {
+          if (CurOpcodeName.find(ExpectedOpcode) == std::string::npos) {
             auto IsCurCsvRow = [&](const CheckerAlertCSVLine &Row) {
               return Row.SubName == SubName && CurIdx == Row.InsnIdx;
             };
@@ -11931,6 +11928,25 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
     }
   }
 
+  errs() << "Sub (" << SubName << ") hardening "
+	 << Instructions.size() << " insns.\n";
+
+  auto FoundIter = IndicesToInstrument.find(SubName);
+  bool SubRequiresInstrumenting = FoundIter != IndicesToInstrument.end();
+  assert(SubRequiresInstrumenting &&
+	 "Trying to instrument sub that doesn't require instrumenting (not "
+	 "in flagged CSV records)");
+
+  const std::set<int> &Indices = FoundIter->second;
+  size_t ExpectedNumOfTransforms = Indices.size();
+  size_t NumActualTransforms = Instructions.size();
+
+  if (NumActualTransforms != ExpectedNumOfTransforms) {
+      errs() << "[CS] ERROR MISMATCH IN NUM TRANFORMS COMPARED TO EXPECTED\n";
+      errs() << "[CS] " << SubName << " expected: " << ExpectedNumOfTransforms << '\n';
+      errs() << "[CS] " << SubName << " actual: " << NumActualTransforms << '\n';
+  }
+  
   for (MachineInstr *MI : Instructions) {
     doX86CompSimpHardening(MI, MF);
   }
@@ -11942,6 +11958,7 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
 bool X86_64CompSimpMitigationPass::shouldRunOnMachineFunction(
     MachineFunction &MF) {
   const std::string FuncName = MF.getName().str();
+  
   auto FuncsIter = FunctionsToInstrument.find(FuncName);
   bool FoundFunction = FuncsIter != FunctionsToInstrument.end();
   return FoundFunction;

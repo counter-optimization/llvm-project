@@ -240,69 +240,79 @@ private:
  * The CSV file has the following header:
  * harden_silentstore,harden_compsimp,harden_dmp,insn_idx
  */
-void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Filename) {
+void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string &Filename) {
     if (GenIndex) {
         return;
     }
 
-    std::ifstream IFS(Filename);
+    std::ifstream IFS(Filename, std::ios_base::ate | std::ios_base::in);
 
     if (!IFS.is_open()) {
-        errs() << "Couldn't open file " << Filename << " from checker.\n";
-        assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
+	/* errs() << "Couldn't open file " << Filename << " from checker.\n"; */
+	assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
     }
 
-    constexpr size_t MaxLineSize = 1024;
-    std::array<char, MaxLineSize> Line{0};
-    std::string ExpectedHeader("subroutine_name,"
-			       "mir_opcode,"
-			       "addr,"
-			       "rpo_idx,"
-			       "tid,"
-			       "problematic_operands,"
-			       "left_operand,"
-			       "right_operand,"
-			       "live_flags,"
-			       "is_live,"
-			       "alert_reason,"
-			       "description,"
-                   "flags_live_in");
+    auto NumCharsInFile = IFS.tellg();
+    IFS.seekg(std::ios_base::beg);
+
+    std::vector<char> Bytes(NumCharsInFile);
+    IFS.read(Bytes.data(), NumCharsInFile);
+
+    std::string FileContents(Bytes.begin(), Bytes.end());
+
+    const std::string ExpectedHeader("subroutine_name,"
+				     "mir_opcode,"
+				     "addr,"
+				     "rpo_idx,"
+				     "tid,"
+				     "problematic_operands,"
+				     "left_operand,"
+				     "right_operand,"
+				     "live_flags,"
+				     "is_live,"
+				     "alert_reason,"
+				     "description,"
+				     "flags_live_in");
     bool IsHeader = true;
+    auto CurLineStart = FileContents.begin();
+    auto NewLine = std::find(FileContents.begin(),
+			     FileContents.end(),
+			     '\n');
 
-    // operator bool() on the returned this* from .getline returns 
-    // false. i think it returns false when EOF is hit?
-    // -1 for null terminator
-    while (IFS.getline(Line.data(), MaxLineSize - 1)) {
-        std::string CurrentLine(Line.data());
-
-        if (IsHeader) {
-            assert(ExpectedHeader == CurrentLine &&
+    while (true) {
+	std::string CurrentLine(CurLineStart, NewLine);
+	
+	if (IsHeader) {
+	    assert(ExpectedHeader == CurrentLine &&
 		   "Unexpected header in checker alert csv file");
-            IsHeader = false;
-        } else {
-            CheckerAlertCSVLine CSVLine(CurrentLine);
+	    IsHeader = false;
+	} else {
+	    CheckerAlertCSVLine CSVLine(CurrentLine);
 
-            if (this->isRelevantCheckerAlertCSVLine(CSVLine)) {
-                this->RelevantCSVLines.push_back(CSVLine);
-		
-		const std::string& SubName = CSVLine.SubName;
-		const std::string& OpcodeName = CSVLine.OpcodeName;
+	    if (this->isRelevantCheckerAlertCSVLine(CSVLine)) {
+		this->RelevantCSVLines.push_back(CSVLine);
+
+		const std::string &SubName = CSVLine.SubName;
+		const std::string &OpcodeName = CSVLine.OpcodeName;
 		int InsnIdx = CSVLine.InsnIdx;
 
 		FunctionsToInstrument.insert(CSVLine.SubName);
 
-		/* add map of (SubName, InsnIdx) -> ExpectedOpcodeNameString for faster checking later */
-		std::pair<std::string, int> NameIdxPair = std::pair<std::string, int>(SubName, InsnIdx);
+		/* add map of (SubName, InsnIdx) -> ExpectedOpcodeNameString for faster
+		 * checking later */
+		std::pair<std::string, int> NameIdxPair =
+		    std::pair<std::string, int>(SubName, InsnIdx);
 		auto ExpectedIter = ExpectedOpcodeNames.find(NameIdxPair);
 		if (ExpectedIter != ExpectedOpcodeNames.end() &&
 		    ExpectedIter->second != OpcodeName) {
 		    errs() << "Duplicate subname, idx pair with differing opcodes: "
 			   << NameIdxPair.first << ", " << NameIdxPair.second
-			   << " differs on opcodes " << ExpectedIter->second << " and " << OpcodeName << '\n';
-		    assert(ExpectedIter == ExpectedOpcodeNames.end() &&
-			   "Duplicate subname, idx pair in hardening pass");
+			   << " differs on opcodes " << ExpectedIter->second << " and "
+			   << OpcodeName << '\n';
+		    /* assert(ExpectedIter == ExpectedOpcodeNames.end() && */
+		    /*        "Duplicate subname, idx pair in hardening pass"); */
 		}
-		ExpectedOpcodeNames.insert({ NameIdxPair, OpcodeName });
+		ExpectedOpcodeNames.insert({NameIdxPair, OpcodeName});
 
 		auto IdxIter = IndicesToInstrument.find(SubName);
 		if (IdxIter == IndicesToInstrument.end()) {
@@ -310,13 +320,20 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Fil
 		    FreshSet.insert(InsnIdx);
 		    IndicesToInstrument[SubName] = FreshSet;
 		} else {
-		    std::set<int>& Indices = IdxIter->second;
+		    std::set<int> &Indices = IdxIter->second;
 		    Indices.insert(InsnIdx);
 		}
-            }
-        }
-
-	Line.fill(0);
+	    }
+	}
+	
+	if (NewLine == std::end(FileContents) ||
+	    NewLine == std::end(FileContents) - 1) {
+	    break;
+	}
+	CurLineStart = NewLine + 1;
+	NewLine = std::find(CurLineStart,
+			    FileContents.end(),
+			    '\n');
     }
 }
 
@@ -632,12 +649,32 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       // flip those bits
       // this value != the Src8 Value
       {
-	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R11D)
-	      .addImm(TwoToThirtyOne);
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	      .addImm((1ull << 38ull) | (1ull << 39ull) | (1ull << 31ull));
+
+	  if (Src8.isImm()) {
+	      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R11B)
+		  .add(Src8);
+	  } else {
+	      auto Reg = Src8.getReg().asMCReg();
+	      if (Reg == X86::AH ||
+		  Reg == X86::BH ||
+		  Reg == X86::CH ||
+		  Reg == X86::DH) {
+		  MCRegister Src16 = TRI->getMatchingSuperReg(Reg,
+							      X86::sub_8bit,
+							      &X86::GR16RegClass);
+		  BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+		      .addReg(Src16);
+		  BuildMI(MBB, MI, DL, TII->get(X86::SHR64ri), X86::R11)
+		      .addReg(X86::R11)
+		      .addImm(8ull);
+	      } else {
+		  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+		      .add(Src8);
+	      }
+	  }
 	  
-	  auto MovOfSrc = Src8.isImm() ? X86::MOV8ri : X86::MOV8rr;
-	  BuildMI(MBB, MI, DL, TII->get(MovOfSrc), X86::R11B)
-	      .add(Src8);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
 	      .addReg(X86::R11D)
