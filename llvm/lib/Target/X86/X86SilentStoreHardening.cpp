@@ -2949,6 +2949,24 @@ static void setupTest(MachineFunction &MF) {
 			    .addImm(0)
 			    .addReg(0)
 			    .addReg(X86::XMM0);
+		    } else if (Op == "MOVUPSmr") {
+			changedOpcode = X86::MOVUPSmr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVUPSmr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
+		    } else if (Op == "MOVDQUmr") {
+			changedOpcode = X86::MOVDQUmr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQUmr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
 		    } else if (Op == "PUSH64i8") {
 			changedOpcode = X86::PUSH64i8;
 			
