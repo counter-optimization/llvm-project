@@ -162,6 +162,7 @@ private:
   void insertSafeAdd16Before(MachineInstr *MI);
   void insertSafeAdd32Before(MachineInstr *MI);
   void insertSafeAdd32rmBefore(MachineInstr *MI);
+  void insertSafeAdd32i32Before(MachineInstr *MI);
   void insertSafeAdd32ri8Before(MachineInstr *MI);
   void insertSafeAdc32mi8Before(MachineInstr *MI);
   void insertSafeAdd32riBefore(MachineInstr *MI);
@@ -8706,6 +8707,43 @@ void X86_64CompSimpMitigationPass::insertSafeSub64Before(MachineInstr *MI) {
 }
 
 void
+X86_64CompSimpMitigationPass::insertSafeAdd32i32Before(MachineInstr *MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+    auto &MRI = MF->getRegInfo();
+
+    MCRegister Dest32 = X86::EAX;
+    MCRegister Dest64 = X86::RAX;
+
+    int32_t Imm = MI->getOperand(0).getImm();
+
+    llvm::errs() << "Dest64 for Add32i32 is: " << TRI->getRegAsmName(Dest64) << '\n';
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32)
+	.addReg(Dest32);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Dest64)
+	.addReg(Dest64)
+	.addImm(1ULL << 31ULL); // 2**31
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64ri32), Dest64)
+	.addReg(Dest64)
+	.addImm(1ULL << 31ULL); // 2**31
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64ri32), Dest64)
+	.addReg(Dest64)
+	.addImm(Imm);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32)
+	.addReg(Dest32);
+}
+
+void
 X86_64CompSimpMitigationPass::insertSafeAdd32riBefore(MachineInstr *MI)
 {
     MachineBasicBlock *MBB = MI->getParent();
@@ -10097,6 +10135,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
+  case X86::ADD32i32: {
+    insertSafeAdd32i32Before(MI);
+    updateStats(MI, 15);
+    MI->eraseFromParent();
+    break;
+  }
   case X86::ADD32ri: {
     insertSafeAdd32riBefore(MI);
     updateStats(MI, 115);
@@ -10539,31 +10583,31 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
   }
   case X86::IMUL64rr: {
     insertSafeIMul64rrBefore(MI);
-    updateStats(MI, 86);
+    updateStats(MI, 129);
     MI->eraseFromParent();
     break;
   }
   case X86::IMUL64rm: {
     insertSafeIMul64rmBefore(MI);
-    updateStats(MI, 89);
+    updateStats(MI, 130);
     MI->eraseFromParent();
     break;
   }
   case X86::IMUL64rri8: {
     insertSafeIMul64rri8Before(MI);
-    updateStats(MI, 87);
+    updateStats(MI, 131);
     MI->eraseFromParent();
     break;
   }
   case X86::IMUL64rri32: {
     insertSafeIMul64rri32Before(MI);
-    updateStats(MI, 88);
+    updateStats(MI, 132);
     MI->eraseFromParent();
     break;
   }
   case X86::IMUL64rmi32: {
     insertSafeIMul64rmi32Before(MI);
-    updateStats(MI, 90);
+    updateStats(MI, 133);
     MI->eraseFromParent();
     break;
   }
@@ -10869,6 +10913,10 @@ static void setupTest(MachineFunction &MF) {
 		  .addImm(0)
 		  .addReg(0)
 		  .addImm(0x25);
+	    } else if (Op == "ADD32i32") {
+		TestAddedOpcode = X86::ADD32i32;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32i32))
+		    .addImm(0x25);
 	    } else if (Op == "ADD32ri") {
 		TestAddedOpcode = X86::ADD32ri;
 		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32ri), X86::ESI)

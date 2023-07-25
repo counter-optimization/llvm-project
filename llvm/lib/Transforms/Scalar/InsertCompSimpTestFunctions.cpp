@@ -75,7 +75,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
   std::vector<std::string> CSInsts{
       "ADD64ri8",  "ADD64ri32", 
       "ADD64rm",   "ADD64rr",   "AND8ri",    "AND64rm",
-      "ADD32rr",   "ADD32ri8",  "ADD32ri",
+      "ADD32rr",   "ADD32ri8",  "ADD32ri",   "ADD32i32",
       "ADD8rm",    "AND64rr",   "AND64i32",  "AND64ri32", "ADD8ri",
       "AND64ri8",  "AND32rr",   "AND32ri8",  "AND32ri",   "AND32i32",
       "OR64rr",    "OR64rm",    "OR64ri8",   "OR32rr",    "OR32ri8",
