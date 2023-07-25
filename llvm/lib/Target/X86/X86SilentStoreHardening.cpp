@@ -1619,8 +1619,10 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       
       break;
   }
+  case X86::PUSH64i32:
   case X86::PUSH64i8: {
-      int64_t Imm8 = MI.getOperand(0).getImm();
+      uint64_t Imm = MI.getOperand(0).getImm();
+      uint8_t Imm8 = Imm;
 
       // BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
       // 	  .addReg(X86::R10)
@@ -2936,7 +2938,15 @@ static void setupTest(MachineFunction &MF) {
 			
 			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64i8))
 			    .addImm(128);
-			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			    .addReg(X86::RAX);
+		    }
+
+		    else if (Op == "PUSH64i32") {
+			changedOpcode = X86::PUSH64i32;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64i32))
+			    .addImm((1ull << 31ull) | (1ull << 7ull));
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 			    .addReg(X86::RAX);
 		    }
 
@@ -2949,7 +2959,7 @@ static void setupTest(MachineFunction &MF) {
 			    .addReg(0)
 			    .addImm(0)
 			    .addReg(0);
-			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 			    .addReg(X86::RAX);
 		    }
 
@@ -2958,7 +2968,7 @@ static void setupTest(MachineFunction &MF) {
 			
 			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 			    .addReg(X86::RSI);
-			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 			    .addReg(X86::RAX);
 		    }
 
@@ -3390,19 +3400,14 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
 
   if (MF.getName().startswith("x86silentstorestest")) {
     setupTest(MF);
+    
     if (MF.getName().contains("_transformed")) {
-      std::vector<MachineInstr *> MIs;
+      std::vector<MachineInstr*> MIs;
       for (auto &MBB : MF) {
         for (auto &MI : MBB) {
-	    if (MI.getOpcode() == changedOpcode &&
-	          changedOpcode == X86::PUSH64r) {
-		MCRegister Src64 = MI.getOperand(0).getReg().asMCReg();
-		if (Src64 == X86::RSI) {
-		    this->doX86SilentStoreHardening(MI, MBB, MF, Remove);
-		}
-	    } else if (MI.NeedsTransforming) {
-	      this->doX86SilentStoreHardening(MI, MBB, MF, Remove);
-	  }
+	    if (MI.NeedsTransforming) {
+		doX86SilentStoreHardening(MI, MBB, MF, Remove);
+	    }
         }
       }
     }
