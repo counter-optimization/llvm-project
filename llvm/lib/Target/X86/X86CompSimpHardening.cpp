@@ -105,7 +105,8 @@ private:
   void doX86CompSimpHardening(MachineInstr *MI, MachineFunction& MF);
   void subFallBack(MachineInstr *MI);
   Register get64BitReg(MachineOperand *MO, const TargetRegisterInfo *TRI);
-    void insertSafeOr8riBefore(MachineInstr* MI);
+  void insertSafeOr8i8Before(MachineInstr* MI);
+  void insertSafeOr8riBefore(MachineInstr* MI);
   void insertSafeOr8Before(MachineInstr *MI);
   void insertSafeOr16Before(MachineInstr *MI);
   void insertSafeOr32Before(MachineInstr *MI);
@@ -3704,6 +3705,36 @@ void X86_64CompSimpMitigationPass::insertSafeXor8Before(MachineInstr *MI) {
   BuildMI(*MBB, *MI, DL, TII->get(X86::XOR64rr), X86::R10).addReg(X86::R10).addReg(X86::R11);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op1).addReg(X86::R10B);
   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Op2).addReg(X86::R11B);
+}
+
+void
+X86_64CompSimpMitigationPass::insertSafeOr8i8Before(MachineInstr* MI)
+{
+    MachineBasicBlock *MBB = MI->getParent();
+    MachineFunction *MF = MBB->getParent();
+    DebugLoc DL = MI->getDebugLoc();
+    const auto &STI = MF->getSubtarget();
+    auto *TII = STI.getInstrInfo();
+    auto *TRI = STI.getRegisterInfo();
+    auto &MRI = MF->getRegInfo();
+
+    MCRegister Dst8 = X86::AL;
+    int64_t Imm8 = MI->getOperand(0).getImm();
+
+    int64_t TwoToTheSixteen = 1ULL << 16ULL;
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R10)
+	.addImm(TwoToTheSixteen);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	.addReg(Dst8);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::OR64ri8), X86::R10)
+	.addReg(X86::R10)
+	.addImm(Imm8);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Dst8)
+	.addReg(X86::R10B);
 }
 
 void
@@ -10669,6 +10700,12 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
       MI->eraseFromParent();
       break;
   }
+  case X86::OR8i8: {
+      insertSafeOr8i8Before(MI);
+      updateStats(MI, 136);
+      MI->eraseFromParent();
+      break;
+  }
   case X86::OR8ri: {
       insertSafeOr8riBefore(MI);
       updateStats(MI, 123);
@@ -11510,6 +11547,10 @@ static void setupTest(MachineFunction &MF) {
 	      AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR8rr), X86::SIL)
 		  .addReg(X86::SIL)
 		  .addReg(X86::DL);
+	    } else if (Op == "OR8i8") {
+		TestAddedOpcode = X86::OR8i8;
+		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR8i8))
+		    .addImm(0XCCULL);
 	    } else if (Op == "OR8ri") {
 		TestAddedOpcode = X86::OR8ri;
 		AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::OR8ri), X86::SIL)
