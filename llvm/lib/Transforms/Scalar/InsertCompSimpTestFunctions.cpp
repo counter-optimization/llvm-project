@@ -98,7 +98,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "IMUL32rr",   "IMUL32rm",    "IMUL64rr",    "IMUL64rm",
       "IMUL64rri8", "IMUL64rri32", "IMUL64rmi32",
   
-      "CMP32rr",    "CMP32rm",     "CMP64rr",     "CMP64rm",   "CMP64mr"
+      "CMP32rr",    "CMP32rm",     "CMP64rr",     "CMP64rm",   "CMP64mr",
       
       "PADDDrr",    "PADDDrm",     "PADDQrr",     "PADDQrm",
       "VPCOMPRESSBZ256rrkz", /* null test name, generates an empty test */
