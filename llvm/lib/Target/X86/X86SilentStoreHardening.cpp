@@ -369,13 +369,6 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF.getRegInfo();
 
-  // create annotation label with temp name
-  /* auto TempSym = MF.getContext().createNamedTempSymbol(); */
-  /* BuildMI(MBB, MI, DL, TII->get(X86::ANNOTATION_LABEL)).addSym(TempSym); */
-  /* BuildMI(MBB, MI, DL, TII->get(X86::EH_LABEL)).addSym(TempSym); */
-  // create machine operand metadata
-  /* auto *TempSymMO = MF.getContext().createTempSymbolMDNode(TempSym); */
-  /* auto *DbgLabel = MBB.getParent()->getSubprogram()->createDebugLocLabel(DL); */
   bool OpcodeSupported = true;
 
   switch (MI.getOpcode()) {
@@ -512,7 +505,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       MCRegister Src64 = TRI->getMatchingSuperReg(Src32, X86::sub_32bit, &X86::GR64RegClass);
 
       auto Dst8 = X86::R12B;
-      auto Dst32 = X86::R12W;
+      auto Dst32 = X86::R12D;
       auto Dst64 = X86::R12;
       
       // load memory contents
@@ -526,13 +519,10 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       }
 
       // do AND32rr CS transform , no flags preserved needed
-      // Dst32 is in R12W, src is in Src32
+      // Dst32 is in R12D, src is in Src32
       {
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
 	      .addReg(Src64);
-
-	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Dst32)
-	      .addReg(Dst32);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Src32)
 	      .addReg(Src32);
@@ -557,12 +547,17 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), Src64)
 	      .addReg(X86::R10);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::CMP32ri))
+	      .addReg(Dst32)
+	      .addImm(0);
+	  BuildMI(MBB, MI, DL, TII->get(X86::CLC));
       }
 
       // compute blinding value and do blinding store
       {
 	  // reload the original value
-	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R10W)
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R10D)
 	      .add(Base)
 	      .add(Scale)
 	      .add(Idx)
@@ -572,8 +567,8 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
 	      .addReg(Dst8);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::NOT32r), X86::R10W)
-	      .addReg(X86::R10W);
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT32r), X86::R10D)
+	      .addReg(X86::R10D);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
 	      .add(Base)
@@ -581,7 +576,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	      .add(Idx)
 	      .add(Offset)
 	      .add(Segment)
-	      .addReg(X86::R10W);
+	      .addReg(X86::R10D);
       }
 
       // do the store of the AND32rr result
@@ -591,10 +586,10 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .add(Idx)
 	  .add(Offset)
 	  .add(Segment)
-	  .addReg(X86::R12W);
+	  .addReg(X86::R12D);
 
       break;
-  };
+  }
   case X86::MOV8mr_NOREX:
   case X86::MOV8mr:
   case X86::MOV8mi: {
@@ -3014,7 +3009,7 @@ static void setupTest(MachineFunction &MF) {
 
 			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND32mr))
 			    .addReg(X86::RSI)
-			    .addImm(0)
+			    .addImm(1)
 			    .addReg(0)
 			    .addImm(0)
 			    .addReg(0)
@@ -3557,7 +3552,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
             ErrIter->Print();
 	    assert(false && "Mismatch in instruction indices");
           }
-          this->doX86SilentStoreHardening(NextMI, MBB, MF, Remove);
+          doX86SilentStoreHardening(NextMI, MBB, MF, Remove);
           doesModifyFunction = true;
         }
       }
