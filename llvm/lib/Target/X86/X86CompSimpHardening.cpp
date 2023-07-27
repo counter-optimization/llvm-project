@@ -5601,20 +5601,25 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   MCRegister rax = X86::RAX;
   MCRegister rdx = X86::RDX;
 
-  int isRaxDest = (rax == MI->getOperand(1).getReg().asMCReg());
-  int isRdxDest = (rdx == MI->getOperand(1).getReg().asMCReg());
-
-  int isRaxSrc = (rax == MI->getOperand(2).getReg().asMCReg());
-  int isRdxSrc = (rdx == MI->getOperand(2).getReg().asMCReg());
-  int useRcxAsSrc = (isRaxSrc || isRdxSrc);
-
   auto Dest64 = MI->getOperand(1).getReg();
-  auto Src64 = useRcxAsSrc ? X86::RCX : MI->getOperand(2).getReg();
+  auto Src64 = MI->getOperand(2).getReg();
 
-  if (Dest64 == Src64) {
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R13)
-      .addReg(X86::R13);
-    Src64 = X86::R13;
+  int isRaxDest = (rax == Dest64.asMCReg());
+  int isRdxDest = (rdx == Dest64.asMCReg());
+
+  int isRaxSrc = (rax == Src64.asMCReg());
+  int isRdxSrc = (rdx == Src64.asMCReg());
+
+  int useRcxAsSrc = 0;
+  int useR9AsSrc = 0;
+  if (isRaxSrc || isRdxSrc || Src64 == Dest64) {
+    if (Dest64.asMCReg() != X86::RCX) {
+        useRcxAsSrc = 1;
+        Src64 = X86::RCX;
+    } else {
+        useR9AsSrc = 1;
+        Src64 = X86::R9;
+    }
   }
 
   auto Dest32 = TRI->getSubReg(Dest64, X86::sub_32bit);
@@ -5640,7 +5645,7 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   auto Scratch2_16 = X86::R13W;
   auto Scratch2_8 = X86::R13B;
 
-  // Save any of RAX/RDX/RCX as necessary
+  // Save any of RAX/RDX/RCX/R9 as necessary
   {
     if (! isRaxDest) {
         BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
@@ -5707,6 +5712,29 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
 
         BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::RCX);
         BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RCX).add(MI->getOperand(2));
+    }
+
+    if (useR9AsSrc) {
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
+        .addReg(X86::RSP)
+        .addImm(1)
+        .addReg(0)
+        .addImm(-8)
+        .addReg(0);
+
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B).addReg(X86::R9B);
+        BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), X86::R12).addReg(X86::R12);
+
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+        .addReg(X86::RSP)
+        .addImm(1)
+        .addReg(0)
+        .addImm(-8)
+        .addReg(0)
+        .addReg(X86::R12);
+
+        BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::R9);
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R9).add(MI->getOperand(2));
     }
   }
   
@@ -6097,9 +6125,12 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
     BuildMI(*MBB, *MI, DL, TII->get(X86::BT64ri8), Scratch2_64).addImm(0);
   }
 
-  // Restore RCX / RDX / RAX as needed
+  // Restore RCX / RDX / RAX / R9 as needed
   if (useRcxAsSrc)
     BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), X86::RCX);
+
+  if (useR9AsSrc)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), X86::R9);
 
   if (! isRdxDest)
     BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), rdx);
@@ -6608,6 +6639,16 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 
     // save args
     {
+    if (IsMemorySrc) {
+        // Retrieve memory operand first, in case it's reading based on RSP
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+            .add(MI->getOperand(0))
+            .add(MI->getOperand(1))
+            .add(MI->getOperand(2))
+            .add(MI->getOperand(3))
+            .add(MI->getOperand(4));
+    }
+
 	if (ShouldUseRcxAsSrc) {
 	    // then SS safe store RCX to stack
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
@@ -6632,6 +6673,11 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 		.addReg(X86::R12);
 
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::RCX);
+
+        if (IsMemorySrc) {
+            BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RCX)
+                .addReg(X86::R13);
+        }
 	    
 	} else {
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R10)
@@ -6640,15 +6686,6 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 
 	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R11)
 	    .addReg(rax);
-    }
-
-    if (IsMemorySrc) {
-	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::RCX)
-	    .add(MI->getOperand(0))
-	    .add(MI->getOperand(1))
-	    .add(MI->getOperand(2))
-	    .add(MI->getOperand(3))
-	    .add(MI->getOperand(4));
     }
 
     if (IsRaxSrc) {
