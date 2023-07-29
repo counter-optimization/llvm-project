@@ -50,16 +50,15 @@ bool InsertScratchGlobals::insertFuncDecl() {
 }
 
 bool InsertScratchGlobals::run() {
-  return false;
-  // if (!EnableGlobalScratch) {
-  //   return false;
-  // }
-  for(int i = 0;i < 5000;i++){
-    Type *I32 = Type::getInt32Ty(F.getContext());
+  if (!EnableGlobalScratch) {
+    return false;
+  }
+  for(int i = 0;i < SSize;i++){
+    Type *I64 = Type::getInt64Ty(F.getContext());
     // Type *ArrI32 = ArrayType::get(I32, SSize);
-    auto *Init = ConstantInt::get(I32, i);
+    auto *Init = ConstantInt::get(I64, 0);
     GlobalVariable *Scratch =
-        new GlobalVariable(F, I32, false, GlobalValue::WeakAnyLinkage, Init);
+        new GlobalVariable(F, I64, false, GlobalValue::WeakAnyLinkage, Init);
     Scratch->setName("llvm_stats" + std::to_string(i));
   }
   return false;
