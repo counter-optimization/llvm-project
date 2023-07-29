@@ -5612,35 +5612,13 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   int isRaxDest = (rax == Dest64.asMCReg());
   int isRdxDest = (rdx == Dest64.asMCReg());
 
-  int isRaxSrc = (rax == Src64.asMCReg());
-  int isRdxSrc = (rdx == Src64.asMCReg());
-
-  int useRcxAsSrc = 0;
-  int useR9AsSrc = 0;
-  if (isRaxSrc || isRdxSrc || Src64 == Dest64) {
-    if (Dest64.asMCReg() != X86::RCX) {
-        useRcxAsSrc = 1;
-        Src64 = X86::RCX;
-    } else {
-        useR9AsSrc = 1;
-        Src64 = X86::R9;
-    }
-  }
-
-  auto Dest32 = TRI->getSubReg(Dest64, X86::sub_32bit);
-  auto Dest16 = TRI->getSubReg(Dest64, X86::sub_16bit);
-  auto Dest8 = TRI->getSubReg(Dest64, X86::sub_8bit);
-  
-  auto Src32 = TRI->getSubReg(Src64, X86::sub_32bit);
-  auto Src16 = TRI->getSubReg(Src64, X86::sub_16bit);
-  auto Src8 = TRI->getSubReg(Src64, X86::sub_8bit);
-
   auto SrcScratch64 = X86::R10;
   auto SrcScratch32 = X86::R10D;
   auto SrcScratch8 = X86::R10B;
 
   auto DestScratch64 = X86::R11;
   auto DestScratch32 = X86::R11D;
+  auto DestScratch8 = X86::R11B;
 
   auto Scratch1_64 = X86::R12;
   auto Scratch1_16 = X86::R12W;
@@ -5650,7 +5628,7 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   auto Scratch2_16 = X86::R13W;
   auto Scratch2_8 = X86::R13B;
 
-  // Save any of RAX/RDX/RCX/R9 as necessary
+  // Save any of RAX/RDX as necessary
   {
     if (! isRaxDest) {
         BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
@@ -5695,52 +5673,6 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
 
         BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::RDX);
     }
-
-    if (useRcxAsSrc) {
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
-        .addReg(X86::RSP)
-        .addImm(1)
-        .addReg(0)
-        .addImm(-8)
-        .addReg(0);
-
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B).addReg(X86::CL);
-        BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), X86::R12).addReg(X86::R12);
-
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-        .addReg(X86::RSP)
-        .addImm(1)
-        .addReg(0)
-        .addImm(-8)
-        .addReg(0)
-        .addReg(X86::R12);
-
-        BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::RCX);
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RCX).add(MI->getOperand(2));
-    }
-
-    if (useR9AsSrc) {
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
-        .addReg(X86::RSP)
-        .addImm(1)
-        .addReg(0)
-        .addImm(-8)
-        .addReg(0);
-
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B).addReg(X86::R9B);
-        BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), X86::R12).addReg(X86::R12);
-
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-        .addReg(X86::RSP)
-        .addImm(1)
-        .addReg(0)
-        .addImm(-8)
-        .addReg(0)
-        .addReg(X86::R12);
-
-        BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::R9);
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::R9).add(MI->getOperand(2));
-    }
   }
   
   // Save Src and Dest values
@@ -5751,45 +5683,45 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   // Calculate first term
   {
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 63ULL);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Src32).addReg(SrcScratch32);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Src64)
-        .addReg(Src64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::EDX).addReg(SrcScratch32);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rdx)
+        .addReg(rdx)
         .addReg(Scratch1_64);
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32).addReg(DestScratch32);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Dest64)
-        .addReg(Dest64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::EAX).addReg(DestScratch32);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+        .addReg(rax)
         .addReg(Scratch1_64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(Dest64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(rax);
 
     // perform safe IMUL
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64rr), Dest64)
-        .addReg(Dest64)
-        .addReg(Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64rr), rax)
+        .addReg(rax)
+        .addReg(rdx);
 
     // revert mask in result
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64)
-        .addReg(Src64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), rdx)
+        .addReg(rdx)
         .addImm(63);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Src8).addImm(1);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::DL).addImm(1);
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Scratch2_64)
         .addReg(Scratch2_64)
         .addImm(63);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Scratch2_8).addImm(1);
     
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8).addReg(Dest8);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Dest8).addImm(2);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Dest64)
-        .addReg(Dest64)
-        .addReg(Src64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Dest64)
-        .addReg(Dest64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8).addReg(X86::AL);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL).addImm(2);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+        .addReg(rax)
+        .addReg(rdx);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+        .addReg(rax)
         .addReg(Scratch2_64);
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Dest8).addReg(Scratch1_8);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL).addReg(Scratch1_8);
 
     // Save 1st term with safe push
     {
@@ -5802,7 +5734,7 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
           .addReg(0);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8)
-          .addReg(Dest8);
+          .addReg(X86::AL);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), Scratch1_64)
           .addReg(Scratch1_64);
@@ -5815,51 +5747,52 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
           .addReg(0)
           .addReg(Scratch1_64);
 
-      BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), Dest64);
+      BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rax);
     }
   }
 
   // Calculate 2nd term
   {
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Src32).addReg(SrcScratch32);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::EDX).addReg(SrcScratch32);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 63ULL);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Src64)
-        .addReg(Src64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rdx)
+        .addReg(rdx)
         .addReg(Scratch1_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 62ULL);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Src64)
-        .addReg(Src64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rdx)
+        .addReg(rdx)
         .addReg(Scratch1_64);
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Dest64).addReg(DestScratch64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Dest16).addImm(1);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Dest64)
-        .addReg(Dest64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rax).addReg(DestScratch64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::AX).addImm(1);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), rax)
+        .addReg(rax)
         .addImm(16);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Dest16).addImm(0);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Dest64)
-        .addReg(Dest64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::AX).addImm(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), rax)
+        .addReg(rax)
         .addImm(16);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rax).addReg(Dest64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(Dest64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(rax);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch1_64).addReg(rdx);
     
     // perform safe IMUL
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64r), Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64r), rdx);
 
     // revert mask in result
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax).addReg(rax).addReg(Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax).addReg(rax).addReg(Scratch1_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SBB64ri8), rdx).addReg(rdx).addImm(0);
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64).addReg(Scratch2_64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch1_64).addReg(Scratch2_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Scratch2_64).addReg(Scratch2_64).addImm(62);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SAR64ri), Src64).addReg(Src64).addImm(2);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SAR64ri), Scratch1_64).addReg(Scratch1_64).addImm(2);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax).addReg(rax).addReg(Scratch2_64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SBB64rr), rdx).addReg(rdx).addReg(Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SBB64rr), rdx).addReg(rdx).addReg(Scratch1_64);
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch2_8).addReg(X86::AL);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL).addImm(1);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 62ULL);
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), rax).addReg(rax).addReg(Scratch1_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64ri8), rdx).addReg(rdx).addImm(0);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL).addReg(Scratch2_8);
@@ -5919,45 +5852,46 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
 
   // Calculate 3rd term
   {
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64).addReg(SrcScratch64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Src16).addImm(1);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Src64)
-        .addReg(Src64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rdx).addReg(SrcScratch64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::DX).addImm(1);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), rdx)
+        .addReg(rdx)
         .addImm(16);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Src16).addImm(0);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Src64)
-        .addReg(Src64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::DX).addImm(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), rdx)
+        .addReg(rdx)
         .addImm(16);
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32).addReg(DestScratch32);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::EAX).addReg(DestScratch32);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 63ULL);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Dest64)
-        .addReg(Dest64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+        .addReg(rax)
         .addReg(Scratch1_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 62ULL);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), Dest64)
-        .addReg(Dest64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax)
+        .addReg(rax)
         .addReg(Scratch1_64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rax).addReg(Dest64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(Dest64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(rax);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch1_64).addReg(rdx);
 
     // perform safe IMUL
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64r), Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64r), rdx);
 
     // revert mask in result
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax).addReg(rax).addReg(Scratch2_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SBB64ri8), rdx).addReg(rdx).addImm(0);
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(Src64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Src64).addReg(Src64).addImm(62);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(Scratch1_64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SHL64ri), Scratch1_64).addReg(Scratch1_64).addImm(62);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SAR64ri), Scratch2_64).addReg(Scratch2_64).addImm(2);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax).addReg(rax).addReg(Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax).addReg(rax).addReg(Scratch1_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SBB64rr), rdx).addReg(rdx).addReg(Scratch2_64);
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch2_8).addReg(X86::AL);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL).addImm(1);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 62ULL);
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), rax).addReg(rax).addReg(Scratch1_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64ri8), rdx).addReg(rdx).addImm(0);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL).addReg(Scratch2_8);
@@ -6017,38 +5951,38 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
 
   // Calculate 4th term
   {
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64).addReg(SrcScratch64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Src16).addImm(1);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Src64)
-        .addReg(Src64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rdx).addReg(SrcScratch64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::DX).addImm(1);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), rdx)
+        .addReg(rdx)
         .addImm(16);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Src16).addImm(0);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Src64)
-        .addReg(Src64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::DX).addImm(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), rdx)
+        .addReg(rdx)
         .addImm(16);
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Dest64).addReg(DestScratch64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Dest16).addImm(1);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), Dest64)
-        .addReg(Dest64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rax).addReg(DestScratch64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::AX).addImm(1);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROR64ri), rax)
+        .addReg(rax)
         .addImm(16);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Dest16).addImm(0);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), Dest64)
-        .addReg(Dest64)
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::AX).addImm(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::ROL64ri), rax)
+        .addReg(rax)
         .addImm(16);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), rax).addReg(Dest64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(Dest64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch2_64).addReg(rax);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), SrcScratch64).addReg(rdx);
 
     // perform safe IMUL
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64r), Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::IMUL64r), rdx);
 
     // revert mask in result
 
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch1_64).addReg(Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch1_64).addReg(SrcScratch64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SAR64ri), Scratch1_64).addReg(Scratch1_64).addImm(32);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SAR64ri), Scratch1_64).addReg(Scratch1_64).addImm(32);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax).addReg(rax).addReg(Src64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::SUB64rr), rax).addReg(rax).addReg(SrcScratch64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SBB64rr), rdx).addReg(rdx).addReg(Scratch1_64);
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Scratch1_64).addReg(Scratch2_64);
@@ -6112,9 +6046,9 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
 
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 63ULL);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8).addReg(Scratch2_8);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), Src64).addImm(1ULL << 63ULL);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Src8).addReg(X86::DL);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::CMP64rr), Src64).addReg(Scratch1_64);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), DestScratch64).addImm(1ULL << 63ULL);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), DestScratch8).addReg(X86::DL);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::CMP64rr), DestScratch64).addReg(Scratch1_64);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), Scratch1_16).addImm(1ULL << 15ULL);
     BuildMI(*MBB, *MI, DL, TII->get(X86::SETCCr), Scratch1_8).addImm(X86::CondCode::COND_NE);
 
@@ -6131,12 +6065,6 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   }
 
   // Restore RCX / RDX / RAX / R9 as needed
-  if (useRcxAsSrc)
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), X86::RCX);
-
-  if (useR9AsSrc)
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), X86::R9);
-
   if (! isRdxDest)
     BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), rdx);
 
