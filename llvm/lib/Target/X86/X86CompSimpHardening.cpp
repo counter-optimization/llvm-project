@@ -50,6 +50,11 @@ static cl::opt<bool> RecordTestCycleCounts(
     cl::desc("If testing x86 CS passes, also record cycle counts."),
     cl::init(false));
 
+static cl::opt<bool>
+    VerifiableTests("x86-cs-verifiable-tests",
+		    cl::desc("[CS] Only output the transformed insn seq, no test abi fn prologue/epilogue."),
+		    cl::init(false));
+
 /* the opcode here is no significance, just to
    deduce placeholder type since i'm too lazy to
    find what the enum name is */
@@ -10902,6 +10907,7 @@ static void setupTest(MachineFunction &MF) {
 	constexpr int CycleCountMeasureAmortizationCount = 2000;
 
 	/* insert saves of r10-15 */
+	if (!VerifiableTests)
 	{
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 	    .addReg(X86::R10);
@@ -10918,7 +10924,7 @@ static void setupTest(MachineFunction &MF) {
 	}
 
 	// record cycle counts
-	if (RecordTestCycleCounts) {
+	if (RecordTestCycleCounts && !VerifiableTests) {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 		.addReg(X86::RAX);
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
@@ -11606,7 +11612,7 @@ static void setupTest(MachineFunction &MF) {
 	while (RecordTestCycleCounts &&
 	       AmortizeCount < CycleCountMeasureAmortizationCount); 
 
-	if (RecordTestCycleCounts) {
+	if (RecordTestCycleCounts && !VerifiableTests) {
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
 		.addReg(X86::RAX);
 	    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
@@ -11650,6 +11656,7 @@ static void setupTest(MachineFunction &MF) {
 
 
 	/* insert restores of r12-15. pushed r12, r13, r14, 15 */
+	if (!VerifiableTests)
 	{
 	  BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
 	    .addReg(X86::R15);
@@ -11667,6 +11674,7 @@ static void setupTest(MachineFunction &MF) {
 
 	/* write state into first argument per 
 	   implementation-tester.c OutState struct in pandora-eval repo */
+	if (!VerifiableTests)
 	{
 	  /*
 	    Intel: [base + index*scale + offset] 
