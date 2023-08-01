@@ -1590,6 +1590,8 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       MachineOperand& Disp = MI.getOperand(3);
       MachineOperand& Segment = MI.getOperand(4);
 
+      Remove.push_back(&MI);
+
       BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
 	  .addReg(X86::RSP)
 	  .addImm(1)
@@ -1604,18 +1606,29 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .add(Disp)
 	  .add(Segment);
 
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
-	  .addReg(X86::R10B);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	  .addReg(X86::R11B);
 
-      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R11)
-	  .addReg(X86::R11);
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	  .addReg(X86::R10);
 
       BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr), X86::RSP)
 	  .addImm(1)
 	  .addReg(0)
 	  .addImm(-8)
 	  .addReg(0)
-	  .addReg(X86::R11);
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr), X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::RSP)
+	  .addReg(X86::RSP)
+	  .addImm(8);
       
       break;
   }
