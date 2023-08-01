@@ -987,8 +987,8 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	      .addReg(X86::R10D)
 	      .addImm(TwoToThirtyOne | 0xF0ULL);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
-	      .addReg(X86::R10B);
+	  // BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	  //     .addReg(X86::R10B);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11D)
 	      .addImm(TwoToThirtyOne);
@@ -1000,12 +1000,15 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	      .addReg(X86::R11D)
 	      .addImm(TwoToThirtyOne | 0x0FULL);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
-	      .addReg(X86::R11B);
+	  // BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+	  //     .addReg(X86::R11B);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), X86::R10D)
 	      .addReg(X86::R10D)
 	      .addReg(X86::R11D);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	      .addReg(X86::R10B);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
 	      .add(BaseRegMO)
