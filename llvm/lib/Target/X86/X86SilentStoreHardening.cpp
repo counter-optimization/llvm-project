@@ -1624,13 +1624,8 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       uint64_t Imm = MI.getOperand(0).getImm();
       uint8_t Imm8 = Imm;
 
-      // BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
-      // 	  .addReg(X86::R10)
-      // 	  .addReg(X86::RSP)
-      // 	  .addImm(0)
-      // 	  .addReg(0)
-      // 	  .addImm(-8)
-      // 	  .addReg(0);
+      Remove.push_back(&MI);
+
       BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
 	  .addReg(X86::RSP)
 	  .addImm(1)
@@ -1638,8 +1633,23 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .addImm(-8)
 	  .addReg(0);
 
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R10B)
-	  .addImm(Imm8);
+      /* if imm sz < 64 bits, then it needs to be sign extended to 64 bits
+         then stored for PUSH64i8 and PUSH64i32 */
+      assert(MI.getOpcode() == X86::PUSH64i8 ||
+	     MI.getOpcode() == X86::PUSH64i32);
+      auto IntoROpcode = MI.getOpcode() == X86::PUSH64i8 ? X86::MOV8ri : X86::MOV32ri;
+      auto SignExtendOpcode = MI.getOpcode() == X86::PUSH64i8 ? X86::MOVSX64rr8 : X86::MOVSX64rr32;
+      auto SignExtendReg = MI.getOpcode() == X86::PUSH64i8 ? X86::R11B : X86::R11D;
+      BuildMI(MBB, MI, DL, TII->get(IntoROpcode), X86::R11)
+	  .addImm(Imm);
+      BuildMI(MBB, MI, DL, TII->get(SignExtendOpcode), X86::R11)
+	  .addReg(SignExtendReg);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	  .addReg(X86::R11B);
+
+      // BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R10B)
+      // 	  .addImm(Imm8);
 
       BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
 	  .addReg(X86::R10);
@@ -1651,10 +1661,24 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .addImm(-8)
 	  .addReg(0)
 	  .addReg(X86::R10);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R11);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::RSP)
+	  .addReg(X86::RSP)
+	  .addImm(8);
 
       break;
   }
   case X86::PUSH64r: {
+      Remove.push_back(&MI);
+      
       MCRegister Src64 = MI.getOperand(0).getReg().asMCReg();
       MCRegister Src8 = TRI->getSubReg(Src64, X86::sub_8bit);
 
@@ -1678,6 +1702,18 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .addImm(-8)
 	  .addReg(0)
 	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(Src64);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::RSP)
+	  .addReg(X86::RSP)
+	  .addImm(8);
       
       break;
   }
