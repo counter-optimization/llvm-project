@@ -448,8 +448,8 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
 	  .addReg(X86::R11D)
 	  .addImm((1ULL << 31ULL) | 0xF0ULL);
-      BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
-	  .addReg(X86::R11B);
+      // BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+      // 	  .addReg(X86::R11B);
 
       // perform safe AND8ri (really AND64ri8 inside of transform) on R10B
       {
@@ -470,12 +470,12 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	      .addReg(X86::R12D)
 	      .addImm((1ULL << 31ULL) | 0x0FULL);
 
-	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R12B)
-	      .addReg(X86::R12B);
-
 	  BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), X86::R11D)
 	      .addReg(X86::R11D)
 	      .addReg(X86::R12D);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+	      .addReg(X86::R11B);
 
 	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
 	      .add(Base)
@@ -835,15 +835,15 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 
     // compute the blinding value
     {
-	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
-	    .addReg(X86::R12);
-
-	BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
 	    .addReg(BaseRegMO.getReg())
 	    .add(ScaleMO)
 	    .add(IndexMO)
 	    .add(OffsetMO)
 	    .add(SegmentMO);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	    .addReg(X86::R12B);
 
 	BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
 	    .addReg(X86::R10);
@@ -1627,7 +1627,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
 	  .addReg(0)
 	  .addImm(-8)
 	  .addReg(0)
-	  .addReg(X86::R10);
+	  .addReg(X86::R11);
 
       BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::RSP)
 	  .addReg(X86::RSP)
