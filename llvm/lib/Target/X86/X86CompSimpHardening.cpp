@@ -5603,6 +5603,22 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF->getRegInfo();
 
+  Module *M = MI->getMF()->getFunction().getParent();
+  GlobalValue *GlobScratchRax = M->getNamedValue("llvm_stats0");
+  GlobalValue *GlobScratchRdx = M->getNamedValue("llvm_stats1");
+  GlobalValue *GlobScratchT1 = M->getNamedValue("llvm_stats2");
+  GlobalValue *GlobScratchT2L = M->getNamedValue("llvm_stats3");
+  GlobalValue *GlobScratchT2U = M->getNamedValue("llvm_stats4");
+  GlobalValue *GlobScratchT3L = M->getNamedValue("llvm_stats5");
+  GlobalValue *GlobScratchT3U = M->getNamedValue("llvm_stats6");
+  assert(GlobScratchRax != NULL);
+  assert(GlobScratchRdx != NULL);
+  assert(GlobScratchT1 != NULL);
+  assert(GlobScratchT2L != NULL);
+  assert(GlobScratchT2U != NULL);
+  assert(GlobScratchT3L != NULL);
+  assert(GlobScratchT3U != NULL);
+
   MCRegister rax = X86::RAX;
   MCRegister rdx = X86::RDX;
 
@@ -5631,47 +5647,77 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   // Save any of RAX/RDX as necessary
   {
     if (! isRaxDest) {
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
-        .addReg(X86::RSP)
+        // Load global address
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+        .addReg(X86::RIP)
         .addImm(1)
         .addReg(0)
-        .addImm(-8)
+        .addGlobalAddress(GlobScratchRax, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+
+        // Safe-store to global address
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
+        .addReg(X86::R13)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
         .addReg(0);
 
         BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B).addReg(X86::AL);
         BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), X86::R12).addReg(X86::R12);
 
         BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-        .addReg(X86::RSP)
+        .addReg(X86::R13)
         .addImm(1)
         .addReg(0)
-        .addImm(-8)
+        .addImm(0)
         .addReg(0)
         .addReg(X86::R12);
 
-        BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::RAX);
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+        .addReg(X86::R13)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0)
+        .addReg(X86::RAX);
     }
     
     if (! isRdxDest) {
-        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
-        .addReg(X86::RSP)
+        // Load global address
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+        .addReg(X86::RIP)
         .addImm(1)
         .addReg(0)
-        .addImm(-8)
+        .addGlobalAddress(GlobScratchRdx, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+
+        // Safe-store to global address
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
+        .addReg(X86::R13)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
         .addReg(0);
 
         BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B).addReg(X86::DL);
         BuildMI(*MBB, *MI, DL, TII->get(X86::NOT64r), X86::R12).addReg(X86::R12);
 
         BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-        .addReg(X86::RSP)
+        .addReg(X86::R13)
         .addImm(1)
         .addReg(0)
-        .addImm(-8)
+        .addImm(0)
         .addReg(0)
         .addReg(X86::R12);
 
-        BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::RDX);
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+        .addReg(X86::R13)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0)
+        .addReg(X86::RDX);
     }
   }
   
@@ -5725,12 +5771,21 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
 
     // Save 1st term with safe push
     {
+      // Load global address
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch2_64)
+      .addReg(X86::RIP)
+      .addImm(1)
+      .addReg(0)
+      .addGlobalAddress(GlobScratchT1, 0, X86II::MO_GOTPCREL)
+      .addReg(0);
+
+      // Safe-store to global address
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
           .addReg(Scratch1_64)
-          .addReg(X86::RSP)
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
           .addReg(0);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8)
@@ -5740,14 +5795,20 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
           .addReg(Scratch1_64);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-          .addReg(X86::RSP)
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
           .addReg(0)
           .addReg(Scratch1_64);
 
-      BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rax);
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+          .addReg(Scratch2_64)
+          .addImm(1)
+          .addReg(0)
+          .addImm(0)
+          .addReg(0)
+          .addReg(rax);
     }
   }
 
@@ -5799,12 +5860,21 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
 
     // save result with safe push
     {
+      // Load global address
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch2_64)
+      .addReg(X86::RIP)
+      .addImm(1)
+      .addReg(0)
+      .addGlobalAddress(GlobScratchT2L, 0, X86II::MO_GOTPCREL)
+      .addReg(0);
+
+      // Safe-store to global address
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
           .addReg(Scratch1_64)
-          .addReg(X86::RSP)
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
           .addReg(0);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8)
@@ -5814,22 +5884,37 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
           .addReg(Scratch1_64);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-          .addReg(X86::RSP)
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
           .addReg(0)
           .addReg(Scratch1_64);
 
-      BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rax);
-    }
-    {
-      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
-          .addReg(Scratch1_64)
-          .addReg(X86::RSP)
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
+          .addReg(0)
+          .addReg(rax);
+    }
+    {
+      // Load global address
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch2_64)
+      .addReg(X86::RIP)
+      .addImm(1)
+      .addReg(0)
+      .addGlobalAddress(GlobScratchT2U, 0, X86II::MO_GOTPCREL)
+      .addReg(0);
+
+      // Safe-store to global address
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
+          .addReg(Scratch1_64)
+          .addReg(Scratch2_64)
+          .addImm(1)
+          .addReg(0)
+          .addImm(0)
           .addReg(0);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8)
@@ -5839,14 +5924,20 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
           .addReg(Scratch1_64);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-          .addReg(X86::RSP)
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
           .addReg(0)
           .addReg(Scratch1_64);
 
-      BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rdx);
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+          .addReg(Scratch2_64)
+          .addImm(1)
+          .addReg(0)
+          .addImm(0)
+          .addReg(0)
+          .addReg(rdx);
     }
   }
 
@@ -5898,12 +5989,21 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
 
     // save result with safe push
     {
+      // Load global address
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch2_64)
+      .addReg(X86::RIP)
+      .addImm(1)
+      .addReg(0)
+      .addGlobalAddress(GlobScratchT3L, 0, X86II::MO_GOTPCREL)
+      .addReg(0);
+
+      // Safe-store to global address
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
           .addReg(Scratch1_64)
-          .addReg(X86::RSP)
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
           .addReg(0);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8)
@@ -5913,22 +6013,37 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
           .addReg(Scratch1_64);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-          .addReg(X86::RSP)
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
           .addReg(0)
           .addReg(Scratch1_64);
 
-      BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rax);
-    }
-    {
-      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
-          .addReg(Scratch1_64)
-          .addReg(X86::RSP)
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
+          .addReg(0)
+          .addReg(rax);
+    }
+    {
+      // Load global address
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch2_64)
+      .addReg(X86::RIP)
+      .addImm(1)
+      .addReg(0)
+      .addGlobalAddress(GlobScratchT3U, 0, X86II::MO_GOTPCREL)
+      .addReg(0);
+
+      // Safe-store to global address
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
+          .addReg(Scratch1_64)
+          .addReg(Scratch2_64)
+          .addImm(1)
+          .addReg(0)
+          .addImm(0)
           .addReg(0);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch1_8)
@@ -5938,14 +6053,20 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
           .addReg(Scratch1_64);
 
       BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-          .addReg(X86::RSP)
+          .addReg(Scratch2_64)
           .addImm(1)
           .addReg(0)
-          .addImm(-8)
+          .addImm(0)
           .addReg(0)
           .addReg(Scratch1_64);
 
-      BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rdx);
+      BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+          .addReg(Scratch2_64)
+          .addImm(1)
+          .addReg(0)
+          .addImm(0)
+          .addReg(0)
+          .addReg(rdx);
     }
   }
 
@@ -6009,8 +6130,33 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   // Recombine terms
   {
     // Recombine 3rd term
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Scratch2_64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Scratch1_64);
+    // Load from globals
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), rax)
+        .addReg(X86::RIP)
+        .addImm(1)
+        .addReg(0)
+        .addGlobalAddress(GlobScratchT3U, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch2_64)
+        .addReg(rax)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), rax)
+        .addReg(X86::RIP)
+        .addImm(1)
+        .addReg(0)
+        .addGlobalAddress(GlobScratchT3L, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch1_64)
+        .addReg(rax)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0);
+
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), rax).addImm(1);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Scratch1_8).addImm(1);
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), rax).addReg(rax).addReg(Scratch1_8);
@@ -6018,8 +6164,33 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), rdx).addReg(rdx).addReg(Scratch2_64);
 
     // Recombine 2nd term
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Scratch2_64);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Scratch1_64);
+    // Load from globals
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), DestScratch64)
+        .addReg(X86::RIP)
+        .addImm(1)
+        .addReg(0)
+        .addGlobalAddress(GlobScratchT2U, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch2_64)
+        .addReg(DestScratch64)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0);
+
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), DestScratch64)
+        .addReg(X86::RIP)
+        .addImm(1)
+        .addReg(0)
+        .addGlobalAddress(GlobScratchT2L, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch1_64)
+        .addReg(DestScratch64)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0);
+
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL).addImm(1);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Scratch1_8).addImm(1);
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADD64rr), rax).addReg(rax).addReg(Scratch1_64);
@@ -6027,7 +6198,20 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
     BuildMI(*MBB, *MI, DL, TII->get(X86::ADC64rr), rdx).addReg(rdx).addReg(Scratch2_64);
 
     // Recombine 1st term
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Scratch1_64);
+    // Load from global
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), DestScratch64)
+        .addReg(X86::RIP)
+        .addImm(1)
+        .addReg(0)
+        .addGlobalAddress(GlobScratchT1, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Scratch1_64)
+        .addReg(DestScratch64)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0);
+
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), Scratch2_8).addReg(Scratch1_8);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), X86::AL).addImm(1);
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8ri), Scratch1_8).addImm(1);
@@ -6065,12 +6249,42 @@ void X86_64CompSimpMitigationPass::insertSafeIMul64rrBefore(MachineInstr *MI) {
   }
 
   // Restore RCX / RDX / RAX / R9 as needed
-  if (! isRdxDest)
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), rdx);
+  if (! isRdxDest) {
+    // Load global address
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+        .addReg(X86::RIP)
+        .addImm(1)
+        .addReg(0)
+        .addGlobalAddress(GlobScratchRdx, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+
+    // Load from global address
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::RDX)
+        .addReg(X86::R13)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0);
+  }
 
   if (! isRaxDest) {
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Dest64).addReg(rax);
-    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), rax);
+
+    // Load global address
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+        .addReg(X86::RIP)
+        .addImm(1)
+        .addReg(0)
+        .addGlobalAddress(GlobScratchRax, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+
+    // Load from global address
+    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::RAX)
+        .addReg(X86::R13)
+        .addImm(1)
+        .addReg(0)
+        .addImm(0)
+        .addReg(0);
   }
 }
 
@@ -6545,6 +6759,11 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
     auto *TII = STI.getInstrInfo();
     auto *TRI = STI.getRegisterInfo();
 
+    Module *M = MI->getMF()->getFunction().getParent();
+    GlobalValue *GlobScratchRcx = M->getNamedValue("llvm_stats0");
+    GlobalValue *GlobScratchT2 = M->getNamedValue("llvm_stats1");
+    GlobalValue *GlobScratchT3 = M->getNamedValue("llvm_stats1");
+
     MCRegister rax = X86::RAX;
     MCRegister eax = X86::EAX;
     MCRegister rdx = X86::RDX;
@@ -6583,12 +6802,19 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
     }
 
 	if (ShouldUseRcxAsSrc) {
-	    // then SS safe store RCX to stack
+	    // then SS safe store RCX to global
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R13)
+        .addReg(X86::RIP)
+        .addImm(1)
+        .addReg(0)
+        .addGlobalAddress(GlobScratchRcx, 0, X86II::MO_GOTPCREL)
+        .addReg(0);
+
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::R12)
-		.addReg(X86::RSP)
+		.addReg(X86::R13)
 		.addImm(1)
 		.addReg(0)
-		.addImm(-8)
+		.addImm(0)
 		.addReg(0);
 
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
@@ -6598,14 +6824,20 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 		.addReg(X86::R12);
 
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-		.addReg(X86::RSP)
+		.addReg(X86::R13)
 		.addImm(1)
 		.addReg(0)
-		.addImm(-8)
+		.addImm(0)
 		.addReg(0)
 		.addReg(X86::R12);
 
-	    BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), X86::RCX);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+		.addReg(X86::R13)
+		.addImm(1)
+		.addReg(0)
+		.addImm(0)
+		.addReg(0)
+		.addReg(X86::RCX);
 
         if (IsMemorySrc) {
             BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RCX)
@@ -6767,15 +6999,22 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL)
 		.addReg(X86::DL);
 
-	    // safe push (SS push64r of RAX)
+	    // safe store to global (SS save of RAX)
 	    // r12 is free for scratch here, rax has important data
 	    {
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), rdx)
+            .addReg(X86::RIP)
+            .addImm(1)
+            .addReg(0)
+            .addGlobalAddress(GlobScratchT2, 0, X86II::MO_GOTPCREL)
+            .addReg(0);
+
 		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
 		    .addReg(X86::R12)
-		    .addReg(X86::RSP)
+		    .addReg(rdx)
 		    .addImm(1)
 		    .addReg(0)
-		    .addImm(-8)
+		    .addImm(0)
 		    .addReg(0);
 
 		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
@@ -6785,14 +7024,20 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 		    .addReg(X86::R12);
 
 		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-		    .addReg(X86::RSP)
+		    .addReg(rdx)
 		    .addImm(1)
 		    .addReg(0)
-		    .addImm(-8)
+		    .addImm(0)
 		    .addReg(0)
 		    .addReg(X86::R12);
 
-		BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rax);
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+		    .addReg(rdx)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0)
+		    .addReg(rax);
 	    }
 	}
     }
@@ -6867,15 +7112,22 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL)
 		.addReg(X86::DL);
 
-	    // safe push (SS push64r of RAX)
+	    // safe save to global (SS save of RAX)
 	    // r12 is free for scratch here, rax has important data
 	    {
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), rdx)
+            .addReg(X86::RIP)
+            .addImm(1)
+            .addReg(0)
+            .addGlobalAddress(GlobScratchT3, 0, X86II::MO_GOTPCREL)
+            .addReg(0);
+
 		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
 		    .addReg(X86::R12)
-		    .addReg(X86::RSP)
+		    .addReg(rdx)
 		    .addImm(1)
 		    .addReg(0)
-		    .addImm(-8)
+		    .addImm(0)
 		    .addReg(0);
 
 		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::R12B)
@@ -6885,14 +7137,20 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 		    .addReg(X86::R12);
 
 		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
-		    .addReg(X86::RSP)
+		    .addReg(rdx)
 		    .addImm(1)
 		    .addReg(0)
-		    .addImm(-8)
+		    .addImm(0)
 		    .addReg(0)
 		    .addReg(X86::R12);
 
-		BuildMI(*MBB, *MI, DL, TII->get(X86::PUSH64r), rax);
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64mr))
+		    .addReg(rdx)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0)
+		    .addReg(rax);
 	    }
 	}
     }
@@ -6992,7 +7250,20 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 
 	// safely add 3rd term
 	{
-	    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Src64);
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Src64)
+            .addReg(X86::RIP)
+            .addImm(1)
+            .addReg(0)
+            .addGlobalAddress(GlobScratchT3, 0, X86II::MO_GOTPCREL)
+            .addReg(0);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
+		    .addReg(Src64)
+		    .addReg(Src64)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0);
 
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11)
 		.addImm(0);
@@ -7041,7 +7312,20 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 
 	// safely add top 32 bits to RAX
 	{
-	    BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), Src64);
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), Src64)
+            .addReg(X86::RIP)
+            .addImm(1)
+            .addReg(0)
+            .addGlobalAddress(GlobScratchT2, 0, X86II::MO_GOTPCREL)
+            .addReg(0);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
+		    .addReg(Src64)
+		    .addReg(Src64)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0);
 
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri32), X86::R11)
 		.addImm(0);
@@ -7091,10 +7375,23 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 
     // restore rcx
     if (ShouldUseRcxAsSrc) {
-	BuildMI(*MBB, *MI, DL, TII->get(X86::POP64r), X86::RCX);
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm), X86::RCX)
+            .addReg(X86::RIP)
+            .addImm(1)
+            .addReg(0)
+            .addGlobalAddress(GlobScratchRcx, 0, X86II::MO_GOTPCREL)
+            .addReg(0);
+
+		BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rm))
+		    .addReg(X86::RCX)
+		    .addReg(X86::RCX)
+		    .addImm(1)
+		    .addReg(0)
+		    .addImm(0)
+		    .addReg(0);
     } else {
-	BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64)
-	    .addReg(X86::R10);
+        BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), Src64)
+            .addReg(X86::R10);
     }
 }
 
@@ -10519,18 +10816,18 @@ void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, Mach
     MI->eraseFromParent();
     break;
   }
-  case X86::MUL64r: {
-      insertSafeMul64rBefore(MI);
-      updateStats(MI, 125);
-      MI->eraseFromParent();
-      break;
-  }
-  case X86::MUL64m: {
-      insertSafeMul64rBefore(MI);
-      updateStats(MI, 32);
-      MI->eraseFromParent();
-      break;
-  }
+//   case X86::MUL64r: {
+//       insertSafeMul64rBefore(MI);
+//       updateStats(MI, 125);
+//       MI->eraseFromParent();
+//       break;
+//   }
+//   case X86::MUL64m: {
+//       insertSafeMul64rBefore(MI);
+//       updateStats(MI, 32);
+//       MI->eraseFromParent();
+//       break;
+//   }
   case X86::CMP64rr: {
     insertSafeCmp64rrBefore(MI);
     updateStats(MI, 77);
