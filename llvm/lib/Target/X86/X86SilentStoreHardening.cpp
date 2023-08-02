@@ -1733,376 +1733,374 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
       
       break;
   }
+  case X86::MOVDQAmr:
+  case X86::MOVDQUmr:
+  case X86::MOVUPSmr:
   case X86::MOVAPSmr: {
     auto &BaseRegMO = MI.getOperand(0);
     auto &ScaleMO = MI.getOperand(1);
     auto &IndexMO = MI.getOperand(2);
     auto &OffsetMO = MI.getOperand(3);
     auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+    auto &SrcRegMO = MI.getOperand(5);
 
-    auto Load = BuildMI(MBB, MI, DL, TII->get(X86::MOVAPSrm), X86::XMM15)
-                    .addReg(BaseRegMO.getReg())
-                    .add(ScaleMO) // Scale
-                    .add(IndexMO) // Index
-                    .add(OffsetMO)
-                    .add(SegmentMO);
+    Remove.push_back(&MI);
 
-    auto FFFF = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                    .addImm(0xFFFFFFFFFFFFFF);
-    auto FirstFFFF =
-        BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-            .addReg(X86::R11);
-    auto ZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                    .addImm(0x00000000000000);
-    auto SecondZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-                          .addReg(X86::XMM14)
-                          .addReg(X86::R11)
-                          .addImm(1);
+    if (MI.getOpcode() == X86::MOVDQAmr) {
+	/* then preserve ZF (really all flags here) */
+	// Save rax
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	    .addReg(X86::RAX);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+	// store LAHF in rax to r13 for later restoration
+	BuildMI(MBB, MI, DL, TII->get(X86::LAHF));
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R13)
+	    .addReg(X86::RAX);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+	// restore rax from r12
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	    .addReg(X86::R12);
+    }
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	.add(BaseRegMO);
 
-    auto Store = BuildMI(MBB, MI, DL, TII->get(X86::MOVAPSmr))
-                     .add(BaseRegMO)
-                     .add(ScaleMO)
-                     .add(IndexMO)
-                     .add(OffsetMO)
-                     .add(SegmentMO)
-                     .addReg(X86::XMM15);
+    for (int WordIdx = 0; WordIdx <= 7; ++WordIdx) {
+	BuildMI(MBB, MI, DL, TII->get(X86::PEXTRWrr), X86::R10D)
+	    .add(SrcRegMO)
+	    .addImm(WordIdx);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVAPSrr), X86::XMM15).add(DestRegMO);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rm), X86::R11W)
+	    .addReg(X86::R12)
+	    .add(ScaleMO)
+	    .add(IndexMO)
+	    .add(OffsetMO)
+	    .add(SegmentMO);
 
-    auto ZZZZ1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                     .addImm(0x00000000000000);
-    auto FirstZZZZ =
-        BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-            .addReg(X86::R11);
-    auto FFFF1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                     .addImm(0xFFFFFFFFFFFFFF);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	    .addReg(X86::R10B);
 
-    auto SecondFFFF = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-                          .addReg(X86::XMM14)
-                          .addReg(X86::R11)
-                          .addImm(1);
+	BuildMI(MBB, MI, DL, TII->get(X86::NOT16r), X86::R11W)
+	    .addReg(X86::R11W);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16mr))
+	    .addReg(X86::R12)
+	    .add(ScaleMO)
+	    .add(IndexMO)
+	    .add(OffsetMO)
+	    .add(SegmentMO)
+	    .addReg(X86::R11W);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16mr))
+	    .addReg(X86::R12)
+	    .add(ScaleMO)
+	    .add(IndexMO)
+	    .add(OffsetMO)
+	    .add(SegmentMO)
+	    .addReg(X86::R10W);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+	if (WordIdx < 7) {
+	    BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::R12)
+		.addReg(X86::R12)
+		.addImm(-2);
+	}
+    }
 
-    auto OR1 = BuildMI(MBB, MI, DL, TII->get(X86::ORPSrm), X86::XMM15)
-                   .addReg(X86::XMM15)
-                   .add(BaseRegMO)
-                   .add(ScaleMO)
-                   .add(IndexMO)
-                   .add(OffsetMO)
-                   .add(SegmentMO);
+    if (MI.getOpcode() == X86::MOVDQAmr) {
+	/* then restore ZF (really all flags here) */
+	// Save rax
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	    .addReg(X86::RAX);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVAPSmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	    .addReg(X86::R13);
+	BuildMI(MBB, MI, DL, TII->get(X86::SAHF));
+
+	// restore rax from r12
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	    .addReg(X86::R12);
+    }
     break;
   }
-  case X86::MOVUPSmr: {
-    auto &BaseRegMO = MI.getOperand(0);
-    auto &ScaleMO = MI.getOperand(1);
-    auto &IndexMO = MI.getOperand(2);
-    auto &OffsetMO = MI.getOperand(3);
-    auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+  // case X86::MOVUPSmr: {
+  //   auto &BaseRegMO = MI.getOperand(0);
+  //   auto &ScaleMO = MI.getOperand(1);
+  //   auto &IndexMO = MI.getOperand(2);
+  //   auto &OffsetMO = MI.getOperand(3);
+  //   auto &SegmentMO = MI.getOperand(4);
+  //   auto &DestRegMO = MI.getOperand(5);
 
-    auto Load = BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrm), X86::XMM15)
-                    .addReg(BaseRegMO.getReg())
-                    .add(ScaleMO) // Scale
-                    .add(IndexMO) // Index
-                    .add(OffsetMO)
-                    .add(SegmentMO);
+  //   auto Load = BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrm), X86::XMM15)
+  //                   .addReg(BaseRegMO.getReg())
+  //                   .add(ScaleMO) // Scale
+  //                   .add(IndexMO) // Index
+  //                   .add(OffsetMO)
+  //                   .add(SegmentMO);
 
-    auto FFFF = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                    .addImm(0xFFFFFFFFFFFFFF);
-    auto FirstFFFF =
-        BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-            .addReg(X86::R11);
-    auto ZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                    .addImm(0x00000000000000);
-    auto SecondZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-                          .addReg(X86::XMM14)
-                          .addReg(X86::R11)
-                          .addImm(1);
+  //   auto FFFF = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //                   .addImm(0xFFFFFFFFFFFFFF);
+  //   auto FirstFFFF =
+  //       BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //           .addReg(X86::R11);
+  //   auto ZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //                   .addImm(0x00000000000000);
+  //   auto SecondZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //                         .addReg(X86::XMM14)
+  //                         .addReg(X86::R11)
+  //                         .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    auto Store = BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSmr))
-                     .add(BaseRegMO)
-                     .add(ScaleMO)
-                     .add(IndexMO)
-                     .add(OffsetMO)
-                     .add(SegmentMO)
-                     .addReg(X86::XMM15);
+  //   auto Store = BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSmr))
+  //                    .add(BaseRegMO)
+  //                    .add(ScaleMO)
+  //                    .add(IndexMO)
+  //                    .add(OffsetMO)
+  //                    .add(SegmentMO)
+  //                    .addReg(X86::XMM15);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrr), X86::XMM15).add(DestRegMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrr), X86::XMM15).add(DestRegMO);
 
-    auto ZZZZ1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                     .addImm(0x00000000000000);
-    auto FirstZZZZ =
-        BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-            .addReg(X86::R11);
-    auto FFFF1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                     .addImm(0xFFFFFFFFFFFFFF);
+  //   auto ZZZZ1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //                    .addImm(0x00000000000000);
+  //   auto FirstZZZZ =
+  //       BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //           .addReg(X86::R11);
+  //   auto FFFF1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //                    .addImm(0xFFFFFFFFFFFFFF);
 
-    auto SecondFFFF = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-                          .addReg(X86::XMM14)
-                          .addReg(X86::R11)
-                          .addImm(1);
+  //   auto SecondFFFF = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //                         .addReg(X86::XMM14)
+  //                         .addReg(X86::R11)
+  //                         .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrm), X86::XMM14)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrm), X86::XMM14)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    // TODO: Find why ORPSrm gave seg fault
-    BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   // TODO: Find why ORPSrm gave seg fault
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
-    break;
-  }
-  case X86::MOVDQAmr: {
-    auto &BaseRegMO = MI.getOperand(0);
-    auto &ScaleMO = MI.getOperand(1);
-    auto &IndexMO = MI.getOperand(2);
-    auto &OffsetMO = MI.getOperand(3);
-    auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
+  //   break;
+  // }
+  // case X86::MOVDQAmr: {
+  //   auto &BaseRegMO = MI.getOperand(0);
+  //   auto &ScaleMO = MI.getOperand(1);
+  //   auto &IndexMO = MI.getOperand(2);
+  //   auto &OffsetMO = MI.getOperand(3);
+  //   auto &SegmentMO = MI.getOperand(4);
+  //   auto &DestRegMO = MI.getOperand(5);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArm), X86::XMM15)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArm), X86::XMM15)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0xFFFFFFFFFFFFFF);
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-        .addReg(X86::R11);
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0x00000000000000);
-    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-        .addReg(X86::XMM14)
-        .addReg(X86::R11)
-        .addImm(1);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0xFFFFFFFFFFFFFF);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //       .addReg(X86::R11);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0x00000000000000);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::R11)
+  //       .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQAmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQAmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).add(DestRegMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).add(DestRegMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0x00000000000000);
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-        .addReg(X86::R11);
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0xFFFFFFFFFFFFFF);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0x00000000000000);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //       .addReg(X86::R11);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0xFFFFFFFFFFFFFF);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-        .addReg(X86::XMM14)
-        .addReg(X86::R11)
-        .addImm(1);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::R11)
+  //       .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArm), X86::XMM14)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArm), X86::XMM14)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQAmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
-    break;
-  }
-  case X86::MOVDQUmr: {
-    auto &BaseRegMO = MI.getOperand(0);
-    auto &ScaleMO = MI.getOperand(1);
-    auto &IndexMO = MI.getOperand(2);
-    auto &OffsetMO = MI.getOperand(3);
-    auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQAmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
+  //   break;
+  // }
+  // case X86::MOVDQUmr: {
+  //   auto &BaseRegMO = MI.getOperand(0);
+  //   auto &ScaleMO = MI.getOperand(1);
+  //   auto &IndexMO = MI.getOperand(2);
+  //   auto &OffsetMO = MI.getOperand(3);
+  //   auto &SegmentMO = MI.getOperand(4);
+  //   auto &DestRegMO = MI.getOperand(5);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM15)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM15)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0xFFFFFFFFFFFFFF);
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-        .addReg(X86::R11);
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0x00000000000000);
-    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-        .addReg(X86::XMM14)
-        .addReg(X86::R11)
-        .addImm(1);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0xFFFFFFFFFFFFFF);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //       .addReg(X86::R11);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0x00000000000000);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::R11)
+  //       .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrr), X86::XMM15).add(DestRegMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrr), X86::XMM15).add(DestRegMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0x00000000000000);
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-        .addReg(X86::R11);
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0xFFFFFFFFFFFFFF);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0x00000000000000);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //       .addReg(X86::R11);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0xFFFFFFFFFFFFFF);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-        .addReg(X86::XMM14)
-        .addReg(X86::R11)
-        .addImm(1);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::R11)
+  //       .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM14)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM14)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
-    break;
-  }
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
+  //   break;
+  // }
   case X86::VMOVAPSYmr: {
     auto &BaseRegMO = MI.getOperand(0);
     auto &ScaleMO = MI.getOperand(1);
