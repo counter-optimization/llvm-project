@@ -7465,14 +7465,11 @@ void X86_64CompSimpMitigationPass::insertSafeMul32rBefore(MachineInstr *MI) {
        .addReg(X86::R11);
    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV8rr), X86::AL).addReg(X86::DL);
    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64rr), X86::RDX).addReg(X86::RAX);
-   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::R13W).addImm(1);
+   BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16ri), X86::DX).addImm(1);
    BuildMI(*MBB, *MI, DL, TII->get(X86::SHR64ri), X86::RDX)
        .addReg(X86::RDX)
        .addImm(32);
    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), X86::EAX).addReg(X86::EAX);
-
-   // SYSEXIT
-   /* BuildMI(*MBB, *MI, DL, TII->get(X86::SYSEXIT)); */
 }
 
 void X86_64CompSimpMitigationPass::insertSafeAdc64rmBefore(MachineInstr *MI) {
