@@ -7276,8 +7276,8 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 		.addImm(0);
 
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHLD64rri8))
-		.addReg(X86::R11)
-		.addReg(X86::R11)
+		.addReg(Scratch2_64, RegState::Define)
+		.addReg(Scratch2_64, RegState::Define)
 		.addReg(Src64)
 		.addImm(32);
 	    
@@ -7338,8 +7338,8 @@ X86_64CompSimpMitigationPass::insertSafeMul64rBefore(MachineInstr *MI)
 		.addImm(0);
 
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::SHLD64rri8))
-		.addReg(Scratch2_64)
-		.addReg(Scratch2_64)
+		.addReg(Scratch2_64, RegState::Define)
+		.addReg(Scratch2_64, RegState::Define)
 		.addReg(Src64)
 		.addImm(32);
 	    
