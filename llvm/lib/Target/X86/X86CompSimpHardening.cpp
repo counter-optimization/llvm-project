@@ -2289,11 +2289,11 @@ X86_64CompSimpMitigationPass::insertSafePADDQBefore(MachineInstr* MI)
 
 	// do 64 bit CS-safe add
 	{
-	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R12D)
-		.addImm(1ull << 16ull);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R12D)
+		.addImm(1ull << 48ull);
 
-	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32ri), X86::R13D)
-		.addImm(1ull << 16ull);
+	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV64ri), X86::R13D)
+		.addImm(1ull << 48ull);
 
 	    BuildMI(*MBB, *MI, DL, TII->get(X86::MOV16rr), X86::R12W)
 		.addReg(X86::R10W);
