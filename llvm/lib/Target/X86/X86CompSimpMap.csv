@@ -15,7 +15,6 @@ Index, Instruction
 14, ADD32ri8
 15, ADD32i32
 16, ADC32mi8
-17, ADD8rm
 18, AND64rr
 19, AND64i32
 20, AND64ri32
@@ -31,14 +30,12 @@ Index, Instruction
 30, OR32ri8
 31, OR8rm
 32, MUL64m
-33, IMUL32rm
 34, XOR64rr
 35, XOR64rm
 36, XOR64mr
 37, XOR32rr
 38, XOR32rm
 39, XOR32ri8
-40, XOR8rr
 41, XOR8rm
 42, SUB64rr
 43, SUB64rm
@@ -61,7 +58,6 @@ Index, Instruction
 60, SHR64ri
 61, SHL64ri
 62, AND16rr
-63, OR8rr
 64, OR16rr
 65, XOR16rr
 66, SUB8rr
@@ -69,9 +65,7 @@ Index, Instruction
 68, SUB32rm
 69, ADD8rr
 70, ADD16rr
-71, ADD32rm
 72, SHR64rCL
-73, SHR32rCL
 74, SHR16rCL
 75, SHR8rCL
 76, MUL32r

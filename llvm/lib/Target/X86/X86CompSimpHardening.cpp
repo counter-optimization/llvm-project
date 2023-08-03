@@ -541,14 +541,14 @@ static void updateStats(MachineInstr *MI, int Idx) {
                       .addReg(0)
                       .addGlobalAddress(Scratch, 0, X86II::MO_GOTPCREL)
                       .addReg(0);
-  auto Load = BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rm), X86::R13D)
+  auto Load = BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rm), X86::R11D)
                   .addReg(X86::R10)
                   .addImm(1)
                   .addReg(0)
                   .addImm(4 * Idx)
                   .addReg(0);
-  auto Inc = BuildMI(*MBB, *MI, DL, TII->get(X86::ADD32ri), X86::R13D)
-                 .addReg(X86::R13D)
+  auto Inc = BuildMI(*MBB, *MI, DL, TII->get(X86::ADD32ri), X86::R11D)
+                 .addReg(X86::R11D)
                  .addImm(1);
   auto Store = BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32mr))
                    .addReg(X86::R10)
@@ -556,7 +556,7 @@ static void updateStats(MachineInstr *MI, int Idx) {
                    .addReg(0)
                    .addImm(4 * Idx)
                    .addReg(0)
-                   .addReg(X86::R13D);
+                   .addReg(X86::R11D);
 }
 
 void X86_64CompSimpMitigationPass::insertSafeVPShufBrrBefore(MachineInstr *MI) {
