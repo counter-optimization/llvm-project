@@ -9162,8 +9162,6 @@ X86_64CompSimpMitigationPass::insertSafeAdd32i32Before(MachineInstr *MI)
 
     int32_t Imm = MI->getOperand(0).getImm();
 
-    llvm::errs() << "Dest64 for Add32i32 is: " << TRI->getRegAsmName(Dest64) << '\n';
-
     BuildMI(*MBB, *MI, DL, TII->get(X86::MOV32rr), Dest32)
 	.addReg(Dest32);
 
