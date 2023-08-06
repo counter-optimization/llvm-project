@@ -3617,9 +3617,7 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     }
   }
 
-  llvm::errs() << "Num MIs to remove: " << Remove.size() << '\n';
   for (auto& MI : Remove) {
-      llvm::errs() << "Erasing MI from parent: " << *MI << '\n';
       MI->eraseFromParent();
   }
   

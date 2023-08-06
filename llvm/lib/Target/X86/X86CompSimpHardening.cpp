@@ -12220,7 +12220,6 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
   std::string SubName = MF.getName().str();
 
   if (!shouldRunOnMachineFunction(MF)) {
-      errs() << "[CS] Skipping running on " << SubName << '\n';
     return false; // Doesn't modify the func if not running
   }
   
@@ -12330,9 +12329,6 @@ bool X86_64CompSimpMitigationPass::runOnMachineFunction(MachineFunction &MF) {
       }
     }
   }
-
-  errs() << "Sub (" << SubName << ") hardening "
-	 << Instructions.size() << " insns.\n";
 
   auto FoundIter = IndicesToInstrument.find(SubName);
   bool SubRequiresInstrumenting = FoundIter != IndicesToInstrument.end();
