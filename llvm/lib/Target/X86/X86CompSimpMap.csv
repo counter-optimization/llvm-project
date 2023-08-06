@@ -129,3 +129,7 @@ Index, Instruction
 134, ADD64i32
 135, AND8i8
 136, OR8i8
+137, IMUL32rri8
+138, SAR32ri
+139, SHL8ri
+140, OR64ri32

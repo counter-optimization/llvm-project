@@ -73,29 +73,29 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
        and ofc 'VPCOMPRESSBZ256rrkz' since it is used in our
        benchmarks as empty test case*/
   std::vector<std::string> CSInsts{
-      "OR8i8",      "OR8ri",       "OR8rr",       "OR16rr",
-      "OR32rr",     "OR32ri8",     "OR64rr",      "OR64rm",    "OR64ri8",
+      "OR8i8",      "OR8ri",       "OR8rr",       "OR16rr",    "OR32rr",
+      "OR32ri8",     "OR64rr",      "OR64rm",    "OR64ri8",    "OR64ri32",
       "XOR8rr",     "XOR8rm",      "XOR16rr",
       "XOR32rr",    "XOR32rm",     "XOR32ri",     "XOR32ri8",
       "XOR64rr",    "XOR64rm",
       "AND8rr",     "AND8i8",      "AND8ri",      "AND16rr",
-      "AND32rr",    "AND32ri",     "AND32ri8",     // "AND32i32", not implemented
+      "AND32rr",    "AND32ri",     "AND32ri8",    "AND32i32",
       "AND64rr",    "AND64rm",     "AND64i32",    "AND64ri32", "AND64ri8",
       "TEST8ri",    "TEST8i8",     "TEST8mi",     "TEST32rr",
       
-      "SHL8rCL",    "SHL32rCL",    "SHL32ri",     "SHL64ri",
+      "SHL8rCL",    "SHL8ri",      "SHL32rCL",    "SHL32ri",   "SHL64ri",
       "SHR8ri",     "SHR32rCL",    "SHR32ri",     "SHR32r1",
       "SHR64r1",    "SHR64ri",
-      "SAR8ri",     "SAR64ri",
+      "SAR8ri",     "SAR64ri",     "SAR32ri",
 
-      "SUB8rr",     "SUB32rr",     "SUB64rr",     "SUB64rm",
+      "SUB8rr",     "SUB32rr",     "SUB32rm",     "SUB64rr",     "SUB64rm",
       "ADD8rm",     "ADD8ri",
       "ADD32rr",    "ADD32rm",     "ADD32i32",    "ADD32ri8",  "ADD32ri",
       "ADD64rr",    "ADD64i32",    "ADD64ri8",    "ADD64ri32", "ADD64rm",
    
       "LEA64r",     "LEA64_32r",
       "MUL32r",     "MUL64r",      "MUL64m",
-      "IMUL32rr",   "IMUL32rm",    "IMUL64rr",    "IMUL64rm",
+      "IMUL32rr",   "IMUL32rm",    "IMUL32rri8",  "IMUL64rr",    "IMUL64rm",
       "IMUL64rri8", "IMUL64rri32", "IMUL64rmi32",
   
       "CMP32rr",    "CMP32rm",     "CMP64rr",     "CMP64rm",   "CMP64mr",
@@ -116,7 +116,7 @@ void InsertCompSimpTestFunctions::readIntoList(std::string Path) {
       "AND8mi", "AND32mr", "PUSH64i8", "PUSH64rmm", "PUSH64r",
       "MOV32mr", "MOV32mi", "MOV16mr", "MOV16mi", "MOVPDI2DImr",
       "MOV64mi32", "MOV64mr", "PUSH64i32", "MOVAPSmr", "MOVDQAmr",
-      "MOVUPSmr", "MOVDQUmr",
+      "MOVUPSmr", "MOVDQUmr", "SUB32mr", "XOR8mr",
       "MOV8mr_HIGHBYTE", 
   };
   
