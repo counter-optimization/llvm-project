@@ -1,4 +1,6 @@
 #include <fstream>
+#include <ios>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <cassert>
@@ -8,6 +10,7 @@
 #include <map>
 
 #include "MCTargetDesc/X86BaseInfo.h"
+#include "MCTargetDesc/X86MCTargetDesc.h"
 #include "X86FrameLowering.h"
 #include "X86InstrInfo.h"
 #include "X86TargetMachine.h"
@@ -43,9 +46,19 @@ static cl::opt<std::string> SilentStoreCSVPath("x86-ss-csv-path",
                         cl::desc("X86 silent store csv path."),
                         cl::init("test_alert.csv"));
 
+static cl::opt<bool> RecordTestCycleCounts(
+    "x86-ss-test-cycle-counts",
+    cl::desc("If testing x86 SS passes, also record cycle counts."),
+    cl::init(false));
+
 static cl::opt<bool> GenIndex("x86-gen-idx-ss",
                         cl::desc("Generate global indices for silent store instrumentation"),
                         cl::init(false));
+
+static cl::opt<bool>
+    VerifiableTests("x86-ss-verifiable-tests",
+		    cl::desc("[SS] Only output the transformed insn seq, no test abi fn prologue/epilogue."),
+		    cl::init(false));
 
 namespace {
 
@@ -101,7 +114,7 @@ private:
 
     inline static bool CSVFileAlreadyParsed{};
 
-    void doX86SilentStoreHardening(MachineInstr& MI, MachineBasicBlock& MBB, MachineFunction& MF);
+    void doX86SilentStoreHardening(MachineInstr& MI, MachineBasicBlock& MBB, MachineFunction& MF, std::vector<MachineInstr*>& Remove);
 
     struct CheckerAlertCSVLine {
 	std::string SubName{};
@@ -207,7 +220,7 @@ private:
 
 	    // Parse insn idx
 	    const std::string& InsnIdxStr = Cols.at(InsnIdxColIdx);
-llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
+// llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
         if (!InsnIdxStr.empty()) {
             this->InsnIdx = std::stoi(InsnIdxStr);
         } else {
@@ -232,69 +245,79 @@ llvm::errs() << "InsnIdxStr: " << InsnIdxStr << "\n";
  * The CSV file has the following header:
  * harden_silentstore,harden_compsimp,harden_dmp,insn_idx
  */
-void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Filename) {
+void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string &Filename) {
     if (GenIndex) {
         return;
     }
 
-    std::ifstream IFS(Filename);
+    std::ifstream IFS(Filename, std::ios_base::ate | std::ios_base::in);
 
     if (!IFS.is_open()) {
-        errs() << "Couldn't open file " << Filename << " from checker.\n";
-        assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
+	/* errs() << "Couldn't open file " << Filename << " from checker.\n"; */
+	assert(IFS.is_open() && "Couldn't open checker alert csv.\n");
     }
 
-    constexpr size_t MaxLineSize = 1024;
-    std::array<char, MaxLineSize> Line{0};
-    std::string ExpectedHeader("subroutine_name,"
-			       "mir_opcode,"
-			       "addr,"
-			       "rpo_idx,"
-			       "tid,"
-			       "problematic_operands,"
-			       "left_operand,"
-			       "right_operand,"
-			       "live_flags,"
-			       "is_live,"
-			       "alert_reason,"
-			       "description,"
-                   "flags_live_in");
+    auto NumCharsInFile = IFS.tellg();
+    IFS.seekg(std::ios_base::beg);
+
+    std::vector<char> Bytes(NumCharsInFile);
+    IFS.read(Bytes.data(), NumCharsInFile);
+
+    std::string FileContents(Bytes.begin(), Bytes.end());
+
+    const std::string ExpectedHeader("subroutine_name,"
+				     "mir_opcode,"
+				     "addr,"
+				     "rpo_idx,"
+				     "tid,"
+				     "problematic_operands,"
+				     "left_operand,"
+				     "right_operand,"
+				     "live_flags,"
+				     "is_live,"
+				     "alert_reason,"
+				     "description,"
+				     "flags_live_in");
     bool IsHeader = true;
+    auto CurLineStart = FileContents.begin();
+    auto NewLine = std::find(FileContents.begin(),
+			     FileContents.end(),
+			     '\n');
 
-    // operator bool() on the returned this* from .getline returns 
-    // false. i think it returns false when EOF is hit?
-    // -1 for null terminator
-    while (IFS.getline(Line.data(), MaxLineSize - 1)) {
-        std::string CurrentLine(Line.data());
-
-        if (IsHeader) {
-            assert(ExpectedHeader == CurrentLine &&
+    while (true) {
+	std::string CurrentLine(CurLineStart, NewLine);
+	
+	if (IsHeader) {
+	    assert(ExpectedHeader == CurrentLine &&
 		   "Unexpected header in checker alert csv file");
-            IsHeader = false;
-        } else {
-            CheckerAlertCSVLine CSVLine(CurrentLine);
+	    IsHeader = false;
+	} else {
+	    CheckerAlertCSVLine CSVLine(CurrentLine);
 
-            if (this->isRelevantCheckerAlertCSVLine(CSVLine)) {
-                this->RelevantCSVLines.push_back(CSVLine);
-		
-		const std::string& SubName = CSVLine.SubName;
-		const std::string& OpcodeName = CSVLine.OpcodeName;
+	    if (this->isRelevantCheckerAlertCSVLine(CSVLine)) {
+		this->RelevantCSVLines.push_back(CSVLine);
+
+		const std::string &SubName = CSVLine.SubName;
+		const std::string &OpcodeName = CSVLine.OpcodeName;
 		int InsnIdx = CSVLine.InsnIdx;
 
 		FunctionsToInstrument.insert(CSVLine.SubName);
 
-		/* add map of (SubName, InsnIdx) -> ExpectedOpcodeNameString for faster checking later */
-		std::pair<std::string, int> NameIdxPair = std::pair<std::string, int>(SubName, InsnIdx);
+		/* add map of (SubName, InsnIdx) -> ExpectedOpcodeNameString for faster
+		 * checking later */
+		std::pair<std::string, int> NameIdxPair =
+		    std::pair<std::string, int>(SubName, InsnIdx);
 		auto ExpectedIter = ExpectedOpcodeNames.find(NameIdxPair);
 		if (ExpectedIter != ExpectedOpcodeNames.end() &&
 		    ExpectedIter->second != OpcodeName) {
 		    errs() << "Duplicate subname, idx pair with differing opcodes: "
 			   << NameIdxPair.first << ", " << NameIdxPair.second
-			   << " differs on opcodes " << ExpectedIter->second << " and " << OpcodeName << '\n';
-		    assert(ExpectedIter == ExpectedOpcodeNames.end() &&
-			   "Duplicate subname, idx pair in hardening pass");
+			   << " differs on opcodes " << ExpectedIter->second << " and "
+			   << OpcodeName << '\n';
+		    /* assert(ExpectedIter == ExpectedOpcodeNames.end() && */
+		    /*        "Duplicate subname, idx pair in hardening pass"); */
 		}
-		ExpectedOpcodeNames.insert({ NameIdxPair, OpcodeName });
+		ExpectedOpcodeNames.insert({NameIdxPair, OpcodeName});
 
 		auto IdxIter = IndicesToInstrument.find(SubName);
 		if (IdxIter == IndicesToInstrument.end()) {
@@ -302,13 +325,20 @@ void X86_64SilentStoreMitigationPass::readCheckerAlertCSV(const std::string& Fil
 		    FreshSet.insert(InsnIdx);
 		    IndicesToInstrument[SubName] = FreshSet;
 		} else {
-		    std::set<int>& Indices = IdxIter->second;
+		    std::set<int> &Indices = IdxIter->second;
 		    Indices.insert(InsnIdx);
 		}
-            }
-        }
-
-	Line.fill(0);
+	    }
+	}
+	
+	if (NewLine == std::end(FileContents) ||
+	    NewLine == std::end(FileContents) - 1) {
+	    break;
+	}
+	CurLineStart = NewLine + 1;
+	NewLine = std::find(CurLineStart,
+			    FileContents.end(),
+			    '\n');
     }
 }
 
@@ -336,171 +366,364 @@ bool X86_64SilentStoreMitigationPass::isRelevantCheckerAlertCSVLine(const Checke
 void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         MachineInstr& MI, 
         MachineBasicBlock& MBB, 
-        MachineFunction& MF) {
+        MachineFunction& MF,
+	std::vector<MachineInstr*>& Remove) {
   DebugLoc DL = MI.getDebugLoc();
   const auto &STI = MF.getSubtarget();
   auto *TII = STI.getInstrInfo();
   auto *TRI = STI.getRegisterInfo();
   auto &MRI = MF.getRegInfo();
 
-  // create annotation label with temp name
-  /* auto TempSym = MF.getContext().createNamedTempSymbol(); */
-  /* BuildMI(MBB, MI, DL, TII->get(X86::ANNOTATION_LABEL)).addSym(TempSym); */
-  /* BuildMI(MBB, MI, DL, TII->get(X86::EH_LABEL)).addSym(TempSym); */
-  // create machine operand metadata
-  /* auto *TempSymMO = MF.getContext().createTempSymbolMDNode(TempSym); */
-  /* auto *DbgLabel = MBB.getParent()->getSubprogram()->createDebugLocLabel(DL); */
   bool OpcodeSupported = true;
 
   switch (MI.getOpcode()) {
+  case X86::MOVPDI2DImr: {
+      // Remove.push_back(&MI);
+
+      auto Base = MI.getOperand(0);
+      auto Scale = MI.getOperand(1);
+      auto Idx = MI.getOperand(2);
+      auto Offset = MI.getOperand(3);
+      auto Segment = MI.getOperand(4);
+
+      auto Src128 = MI.getOperand(5).getReg().asMCReg();
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOVPDI2DIrr))
+	  .addReg(X86::R10D)
+	  .addReg(Src128);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm))
+	  .addReg(X86::R11D)
+	  .add(Base)
+	  .add(Scale)
+	  .add(Idx)
+	  .add(Offset)
+	  .add(Segment);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr))
+	  .addReg(X86::R10W)
+	  .addReg(X86::R11W);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT32r), X86::R10D)
+	  .addReg(X86::R10D);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+          .add(Base)
+          .add(Scale)
+          .add(Idx)
+          .add(Offset)
+          .add(Segment)
+          .addReg(X86::R10D);
+      
+      break;
+  }
+  case X86::AND8mi: {
+      Remove.push_back(&MI);
+
+      MachineOperand& Base = MI.getOperand(0);
+      MachineOperand& Scale = MI.getOperand(1);
+      MachineOperand& Idx = MI.getOperand(2);
+      MachineOperand& Offset = MI.getOperand(3);
+      MachineOperand& Segment = MI.getOperand(4);
+
+      int64_t Imm8 = MI.getOperand(5).getImm();
+
+      // set up R10D for later CS-safe bitwise-and
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R10D)
+	  .addImm(1ULL << 16ULL);
+
+      // load memory contents into R10B
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	  .add(Base)
+	  .add(Scale)
+	  .add(Idx)
+	  .add(Offset)
+	  .add(Segment);
+
+      // copy it into R11B for later computing blinding value
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R11D)
+	  .addImm(1ULL << 31ULL);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	  .addReg(X86::R10B);
+      BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
+	  .addReg(X86::R11D)
+	  .addImm((1ULL << 31ULL) | 0xF0ULL);
+      // BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+      // 	  .addReg(X86::R11B);
+
+      // perform safe AND8ri (really AND64ri8 inside of transform) on R10B
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND64ri8), X86::R10)
+	      .addReg(X86::R10)
+	      .addImm(Imm8);
+      }
+
+      // compute the blinding value, do blinding store, do final store
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R12D)
+	      .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+	      .addReg(X86::R10B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R12D)
+	      .addReg(X86::R12D)
+	      .addImm((1ULL << 31ULL) | 0x0FULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), X86::R11D)
+	      .addReg(X86::R11D)
+	      .addReg(X86::R12D);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+	      .addReg(X86::R11B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .addReg(X86::R11B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .addReg(X86::R10B);
+      }
+
+      
+      break;
+  }
+  case X86::AND32mr: {
+      Remove.push_back(&MI);
+
+      MachineOperand& Base = MI.getOperand(0);
+      MachineOperand& Scale = MI.getOperand(1);
+      MachineOperand& Idx = MI.getOperand(2);
+      MachineOperand& Offset = MI.getOperand(3);
+      MachineOperand& Segment = MI.getOperand(4);
+
+      MCRegister Src32 = MI.getOperand(5).getReg().asMCReg();
+      MCRegister Src64 = TRI->getMatchingSuperReg(Src32, X86::sub_32bit, &X86::GR64RegClass);
+
+      auto Dst8 = X86::R12B;
+      auto Dst32 = X86::R12D;
+      auto Dst64 = X86::R12;
+      
+      // load memory contents
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), Dst32)
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment);
+      }
+
+      // do AND32rr CS transform , no flags preserved needed
+      // Dst32 is in R12D, src is in Src32
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	      .addReg(Src64);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Src32)
+	      .addReg(Src32);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	      .addImm(1ull << 33ull); // 2**33
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), Src64)
+	      .addReg(Src64)
+	      .addReg(X86::R11);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), Dst64)
+	      .addReg(Dst64)
+	      .addReg(X86::R11);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND64rr), Dst64)
+	      .addReg(Dst64)
+	      .addReg(Src64);
+
+	  // BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Dst32)
+	  //     .addReg(Dst32);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), Src64)
+	      .addReg(X86::R10);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::CMP32ri))
+	      .addReg(Dst32)
+	      .addImm(0);
+	  BuildMI(MBB, MI, DL, TII->get(X86::CLC));
+      }
+
+      // compute blinding value and do blinding store
+      {
+	  // reload the original value
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R10D)
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	      .addReg(Dst8);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT32r), X86::R10D)
+	      .addReg(X86::R10D);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .addReg(X86::R10D);
+      }
+
+      // do the store of the AND32rr result
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+	  .add(Base)
+	  .add(Scale)
+	  .add(Idx)
+	  .add(Offset)
+	  .add(Segment)
+	  .addReg(X86::R12D);
+
+      break;
+  }
+  case X86::MOV8mr_NOREX:
   case X86::MOV8mr:
   case X86::MOV8mi: {
-    auto NumOperands = MI.getNumOperands();
-    auto &BaseRegMO = MI.getOperand(0);
-    auto &ScaleMO = MI.getOperand(1);
-    auto &IndexMO = MI.getOperand(2);
-    auto &OffsetMO = MI.getOperand(3);
-    auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+      Remove.push_back(&MI);
+      
+      MachineOperand& Base = MI.getOperand(0);
+      MachineOperand& Scale = MI.getOperand(1);
+      MachineOperand& Idx = MI.getOperand(2);
+      MachineOperand& Offset = MI.getOperand(3);
+      MachineOperand& Segment = MI.getOperand(4);
 
-    /* Handle EFLAGS
-     * mov r10 eax
-     * mov eax eflags
-     *
-     * mov eflags eax
-     * mov eax 10
-     *
-     * or
-     *
-     * blind move
-     * push eflags
-     * pop r10
-     *
-     * push r10
-     * pop eflags
-     * blind move
-     */
+      // An immediate or a register, so keep as MachineOperand
+      MachineOperand& Src8 = MI.getOperand(5);
 
-    /* EFLAG hack 1
-     * MachineInstr *Push = BuildMI(MBB, MI, DL, TII->get(X86::PUSHF32));
-     * Push->getOperand(2).setIsUndef();
-     * Push->getOperand(3).setIsUndef();
-     */
+      uint64_t TwoToThirtyOne = 1ull << 31ull;
 
-    // EFLAG hack 2
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10).addReg(X86::RAX);
-    BuildMI(MBB, MI, DL, TII->get(X86::LAHF));
+      // Save flags
+      // save them into R12 while preserving RAX (since LAHF writes
+      // the upper 8 bits of AX (AH not AL).
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	      .addReg(X86::RAX);
+	  BuildMI(MBB, MI, DL, TII->get(X86::LAHF));
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	      .addReg(X86::RAX);
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	      .addReg(X86::R10);
+      }
 
-    // TODO Use XCHG
-    // BuildMI(MBB, MI, DL,
-    // TII->get(X86::XCHG64rr)).addReg(X86::RAX).addReg(X86::R10).addReg(X86::RAX).addReg(X86::R10);
+      // Load the 8-bit value at the memory address,
+      // take the *high* 4 bit nibble,
+      // flip those bits
+      // this value != the memory contents value
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R10D)
+	      .addImm(TwoToThirtyOne);
 
-    /* EFLAG hack 3
-     * MachineInstr *Push = BuildMI(MBB, MI, DL, TII->get(X86::PUSHF32));
-     * Push->getOperand(2).setIsUndef();
-     * Push->getOperand(3).setIsUndef();
-     * BuildMI(MBB, MI, DL, TII->get(X86::POP32r)).addReg(X86::R10D);
-     */
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment);
 
-    Register B, S, I, D;
-    if (BaseRegMO.isReg())
-      B = getEqR10(BaseRegMO.getReg());
-    if (DestRegMO.isReg())
-      D = getEqR10(DestRegMO.getReg());
-    if (SegmentMO.isReg())
-      S = getEqR10(SegmentMO.getReg());
-    if (IndexMO.isReg())
-      I = getEqR10(IndexMO.getReg());
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addImm(TwoToThirtyOne | (0xF0ull)); // (2**31) & 0xF0
+      }
 
-    auto MOV1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R11B)
-                    .addReg(B)
-                    .add(ScaleMO);
-    if (IndexMO.isReg())
-      MOV1.addReg(I);
-    else
-      MOV1.add(IndexMO);
-    MOV1.add(OffsetMO);
-    if (SegmentMO.isReg())
-      MOV1.addReg(S);
-    else
-      MOV1.add(SegmentMO);
+      // Load the 8-bit value we want to store to the memory address
+      // take the *low* 4 bit nibble,
+      // flip those bits
+      // this value != the Src8 Value
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	      .addImm((1ull << 38ull) | (1ull << 39ull) | (1ull << 31ull));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), Register(X86::R11B))
-        .addUse(X86::R11B)
-        .addImm(0xF0);
+	  if (Src8.isImm()) {
+	      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R11B)
+		  .add(Src8);
+	  } else {
+	      auto Reg = Src8.getReg().asMCReg();
+	      if (Reg == X86::AH ||
+		  Reg == X86::BH ||
+		  Reg == X86::CH ||
+		  Reg == X86::DH) {
+		  MCRegister Src16 = TRI->getMatchingSuperReg(Reg,
+							      X86::sub_8bit,
+							      &X86::GR16RegClass);
+		  BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+		      .addReg(Src16);
+		  BuildMI(MBB, MI, DL, TII->get(X86::SHR64ri), X86::R11)
+		      .addReg(X86::R11)
+		      .addImm(8ull);
+	      } else {
+		  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+		      .add(Src8);
+	      }
+	  }
+	  
 
-    BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
-        .addReg(Register(X86::R11B));
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
+	      .addReg(X86::R11D)
+	      .addImm(TwoToThirtyOne | 0x0Full);
+      }
 
-    auto MOV2 =
-        BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr)).addReg(B).add(ScaleMO);
-    if (IndexMO.isReg())
-      MOV2.addReg(I);
-    else
-      MOV2.add(IndexMO);
-    MOV2.add(OffsetMO);
-    if (SegmentMO.isReg())
-      MOV2.addReg(S);
-    else
-      MOV2.add(SegmentMO);
-    MOV2.addDef(X86::R11B);
+      // combine the low 4 bit nibble, high 4 bit nibble into
+      // the final blinding value that is != Src8 and != memory content
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addReg(X86::R11D);
 
-    if (DestRegMO.isImm()) {
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R11B)
-          .addImm(DestRegMO.getImm());
-    } else {
-      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B).addReg(D);
-    }
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	      .addReg(X86::R10B);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::AND8ri), X86::R11B)
-        .addUse(X86::R11B)
-        .addImm(0x0F);
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .addReg(X86::R10B);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Register(X86::R11B))
-        .addReg(Register(X86::R11B));
+	  auto MovOfSrc = Src8.isImm() ? X86::MOV8mi : X86::MOV8mr;
+	  BuildMI(MBB, MI, DL, TII->get(MovOfSrc))
+	      .add(Base)
+	      .add(Scale)
+	      .add(Idx)
+	      .add(Offset)
+	      .add(Segment)
+	      .add(Src8);
+      }
 
-    auto OR1 = BuildMI(MBB, MI, DL, TII->get(X86::OR8rm), X86::R11B)
-                   .addUse(X86::R11B)
-                   .addReg(B)
-                   .add(ScaleMO);
-    if (IndexMO.isReg())
-      OR1.addReg(I);
-    else
-      OR1.add(IndexMO);
+      // Restore the saved flags out of R12 while preserving RAX
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	      .addReg(X86::RAX);
 
-    OR1.add(OffsetMO);
-    if (SegmentMO.isReg())
-      OR1.addReg(S);
-    else
-      OR1.add(SegmentMO);
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	      .addReg(X86::R12);
 
-    auto MOV3 = BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
-                    .addReg(B)     // Base
-                    .add(ScaleMO); // Scale
-    if (IndexMO.isReg())
-      MOV3.addReg(I);
-    else
-      MOV3.add(IndexMO);
+	  BuildMI(MBB, MI, DL, TII->get(X86::SAHF));
 
-    MOV3.add(OffsetMO); // Disp/offset
-    if (SegmentMO.isReg())
-      MOV3.addReg(S);
-    else
-      MOV3.add(SegmentMO);
-
-    MOV3.addReg(X86::R11B);
-
-    // TODO Use XCHG
-    // BuildMI(MBB, MI, DL,
-    // TII->get(X86::XCHG64rr),X86::RAX).addReg(X86::R10).addUse(X86::RAX).addUse(X86::R10);
-    BuildMI(MBB, MI, DL, TII->get(X86::SAHF));
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX).addReg(X86::R10);
-
-    /* EFLAG hack 3
-     * BuildMI(MBB, MI, DL, TII->get(X86::PUSH32r)).addReg(X86::R10D);
-     * MachineInstr *Pop = BuildMI(MBB, MI, DL, TII->get(X86::POPF32));
-     */
-    break;
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	      .addReg(X86::R10);
+      }
+    
+      break;
   }
   case X86::MOV16mr:
   case X86::MOV16mi: {
@@ -553,6 +776,858 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     // the previously inserted insns are all inserted before the store
     // of the sensitive data, so it's already there.
     break;
+  }
+  case X86::XOR8mr: {
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &SrcRegMO = MI.getOperand(5);
+
+    Remove.push_back(&MI);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R12B)
+	.add(BaseRegMO)
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO);
+
+    // Perform CS transform
+
+    auto Src8 = SrcRegMO.getReg().asMCReg();
+    auto Src64 = TRI->getMatchingSuperReg(Src8, X86::sub_8bit,
+                                            &X86::GR64RegClass);
+    
+    auto Dest64 = X86::R11;
+    auto Dest32 = X86::R11D;
+    auto Dest8 = X86::R11B;
+    
+    auto Scratch64 = X86::R10;
+    auto Scratch32 = X86::R10D;
+    auto Scratch8 = X86::R10B;
+  
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri32), Scratch64).addImm(1ULL << 16ULL);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Scratch8).addReg(Src8);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri32), Dest64).addImm(1ULL << 16ULL);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), Dest8).addReg(X86::R12B);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::XOR64rr), Dest64)
+        .addReg(Dest64)
+        .addReg(Scratch64);
+
+    // Perform blinding store
+    uint64_t TwoToThirtyOne = 1ULL << 31ULL;
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), Scratch32)
+        .addImm(TwoToThirtyOne);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), Scratch8)
+        .add(BaseRegMO)
+        .add(ScaleMO)
+        .add(IndexMO)
+        .add(OffsetMO)
+        .add(SegmentMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), Scratch32)
+        .addReg(Scratch32)
+        .addImm(TwoToThirtyOne | 0xF0ULL);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R12D)
+        .addImm(TwoToThirtyOne);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+        .addReg(Dest8);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R12D)
+        .addReg(X86::R12D)
+        .addImm(TwoToThirtyOne | 0x0FULL);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), Scratch32)
+        .addReg(Scratch32)
+        .addReg(X86::R12D);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), Scratch8)
+        .addReg(Scratch8);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+        .add(BaseRegMO)
+        .add(ScaleMO)
+        .add(IndexMO)
+        .add(OffsetMO)
+        .add(SegmentMO)
+        .addReg(Scratch8);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+        .add(BaseRegMO)
+        .add(ScaleMO)
+        .add(IndexMO)
+        .add(OffsetMO)
+        .add(SegmentMO)
+        .addReg(Dest8);
+
+    break;
+  }
+  case X86::XOR64mr: {
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &SrcRegMO = MI.getOperand(5);
+
+    Remove.push_back(&MI);
+
+    MCRegister Src = SrcRegMO.getReg().asMCReg();
+    MCRegister Src16 = TRI->getSubReg(Src, X86::sub_16bit);
+
+    // load contents of memory into scratch R12
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12)
+	.add(BaseRegMO)
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO);
+
+    // do CS xor64 transform
+    {
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	    .addImm(1ULL << 16ULL); // 2 ** 16
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+	    .addReg(Src16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Src16)
+	    .addImm(1);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	    .addImm(1ULL << 16ULL);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+	    .addReg(X86::R12W);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), X86::R12W)
+	    .addImm(1);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::XOR64rr), X86::R12)
+	    .addReg(X86::R12)
+	    .addReg(Src);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::XOR64rr), X86::R11)
+	    .addReg(X86::R11)
+	    .addReg(X86::R10);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Src16)
+	    .addReg(X86::R10W);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+	    .addReg(X86::R11W);
+    }
+
+    // compute the blinding value
+    {
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	    .addReg(BaseRegMO.getReg())
+	    .add(ScaleMO)
+	    .add(IndexMO)
+	    .add(OffsetMO)
+	    .add(SegmentMO);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	    .addReg(X86::R12B);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	    .addReg(X86::R10);
+    }
+
+    // blinding store
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO)
+	.addReg(X86::R10);
+
+    // orig store
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO)
+	.addReg(X86::R12);
+    
+    break;
+  }
+  case X86::ADD64mi8: {
+      Remove.push_back(&MI);
+
+      auto &BaseRegMO = MI.getOperand(0);
+      auto &ScaleMO = MI.getOperand(1);
+      auto &IndexMO = MI.getOperand(2);
+      auto &OffsetMO = MI.getOperand(3);
+      auto &SegmentMO = MI.getOperand(4);
+
+      auto Imm = MI.getOperand(5).getImm();
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R12)
+	  .addImm(0);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R12)
+	  .addImm(Imm);
+      BuildMI(MBB, MI, DL, TII->get(X86::MOVSX64rr8), X86::R12)
+	  .addReg(X86::R12B);
+      BuildMI(MBB, MI, DL, TII->get(X86::NEG64r), X86::R12)
+	  .addReg(X86::R12);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R11)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), X86::R11)
+	  .addReg(X86::R11)
+	  .addReg(X86::R12);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	  .addReg(X86::R11B);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO)
+	  .addReg(X86::R11);
+      
+      break;
+  }
+  case X86::ADD8mr: {
+      Remove.push_back(&MI);
+
+      auto &BaseRegMO = MI.getOperand(0);
+      auto &ScaleMO = MI.getOperand(1);
+      auto &IndexMO = MI.getOperand(2);
+      auto &OffsetMO = MI.getOperand(3);
+      auto &SegmentMO = MI.getOperand(4);
+
+      MCRegister Src8 = MI.getOperand(5).getReg().asMCReg();
+
+      // load the memory contents (byte) into R12B
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R12B)
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO);
+
+      // ADD8rr CS transform on R12B as dest, Src8 as src reg
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	      .addImm(1ULL << 31ULL); // 2**31
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	      .addReg(X86::R12B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	      .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	      .addReg(Src8);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::ADD64rr), X86::R10)
+	      .addReg(X86::R10)
+	      .addReg(X86::R11);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+	      .addReg(X86::R10B);
+      }
+
+      // blinding store of the ADD8rr transform result in R12B
+      // this is the MOV8mr transform
+      {
+	  uint64_t TwoToThirtyOne = 1ULL << 31ULL;
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32ri), X86::R10D)
+	      .addImm(TwoToThirtyOne);
+	  
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addImm(TwoToThirtyOne | 0xF0ULL);
+
+	  // BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	  //     .addReg(X86::R10B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11D)
+	      .addImm(TwoToThirtyOne);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	      .addReg(X86::R12B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::AND32ri), X86::R11D)
+	      .addReg(X86::R11D)
+	      .addImm(TwoToThirtyOne | 0x0FULL);
+
+	  // BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R11B)
+	  //     .addReg(X86::R11B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::OR32rr), X86::R10D)
+	      .addReg(X86::R10D)
+	      .addReg(X86::R11D);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT8r), X86::R10B)
+	      .addReg(X86::R10B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO)
+	      .addReg(X86::R10B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8mr))
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO)
+	      .addReg(X86::R12B);
+      }
+
+      break;
+  }
+  case X86::ADD64mr: {
+    auto &BaseRegMO = MI.getOperand(0);
+    auto &ScaleMO = MI.getOperand(1);
+    auto &IndexMO = MI.getOperand(2);
+    auto &OffsetMO = MI.getOperand(3);
+    auto &SegmentMO = MI.getOperand(4);
+    auto &SrcRegMO = MI.getOperand(5);
+
+    Remove.push_back(&MI);
+
+    auto Src = SrcRegMO.getReg().asMCReg();
+    auto Src16 = TRI->getSubReg(SrcRegMO.getReg(), X86::sub_16bit);
+    auto Src8 = TRI->getSubReg(SrcRegMO.getReg(), X86::sub_8bit);
+
+    /* 1. need to load contents of memory into a scratch register 
+       2. need to do ADD64 mitigation
+       3. need to blinding store
+       4. need to do the store of ADD64 result
+    */
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R12)
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO);
+
+    // do CS add64rr transform
+    {
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+	    .addImm(1ULL << 48ULL); // 2 ** 48
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R10W)
+	    .addReg(X86::R12W);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), X86::R12W)
+	    .addImm(1);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+	    .addImm(1ULL << 48ULL); // 2 ** 48
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R11W)
+	    .addReg(Src16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Src16)
+	    .addImm(1);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), X86::R10)
+	    .addReg(X86::R10)
+	    .addImm(16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), X86::R11)
+	    .addReg(X86::R11)
+	    .addImm(16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R12)
+	    .addReg(X86::R12)
+	    .addImm(16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Src)
+	    .addReg(Src)
+	    .addImm(16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ADD32rr), X86::R10D)
+	    .addReg(X86::R10D)
+	    .addReg(X86::R11D);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ADC64rr), X86::R12)
+	    .addReg(X86::R12)
+	    .addReg(Src);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R11)
+	    .addReg(X86::R11)
+	    .addImm(16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Src)
+	    .addReg(Src)
+	    .addImm(16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), X86::R10)
+	    .addReg(X86::R10)
+	    .addImm(16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::RCL64ri), X86::R12)
+	    .addReg(X86::R12)
+	    .addImm(16);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), X86::R12W)
+	    .addReg(X86::R10W);
+
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Src16)
+	.addReg(X86::R11W);
+    }
+	
+    // Compute the blinding value
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R10)
+	.addReg(X86::R12);
+    
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rm), X86::R10B)
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT64r),  X86::R10)
+	.addReg(X86::R10);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO)
+	.addReg(X86::R10);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	.addReg(BaseRegMO.getReg())
+	.add(ScaleMO)
+	.add(IndexMO)
+	.add(OffsetMO)
+	.add(SegmentMO)
+	.addReg(X86::R12);
+
+    break;
+  }
+  case X86::ADD32mr: {
+      Remove.push_back(&MI);
+      
+      MachineOperand& BaseRegMO = MI.getOperand(0);
+      MachineOperand& ScaleMO = MI.getOperand(1);
+      MachineOperand& IndexMO = MI.getOperand(2);
+      MachineOperand& OffsetMO = MI.getOperand(3);
+      MachineOperand& SegmentMO = MI.getOperand(4);
+      
+      MCRegister Src32 = MI.getOperand(5).getReg().asMCReg();
+
+      // load the memory contents
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm), X86::R12D)
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), X86::R11D)
+	  .addReg(X86::R12D);
+
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), X86::R10D)
+	      .addReg(Src32);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R13)
+	      .addImm(1ull << 33ull);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), X86::R12)
+	      .addReg(X86::R12)
+	      .addReg(X86::R13);
+
+	  // BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R12)
+	  //     .addReg(X86::R12)
+	  //     .addImm(X86::R13);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), X86::R10)
+	      .addReg(X86::R10)
+	      .addReg(X86::R13);
+
+	  // BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), X86::R10)
+	  //     .addReg(X86::R10)
+	  //     .addImm(1ULL << 31ULL);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::ADD64rr), X86::R12)
+	      .addReg(X86::R12)
+	      .addReg(X86::R10);
+
+	  // BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), X86::R12D)
+	  //     .addReg(X86::R12D);
+      }
+
+      // compute the blinding value
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	      .addReg(X86::R12B);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::NOT32r), X86::R11D)
+	      .addReg(X86::R11D);
+      }
+
+      // store blinding value and the result of ADD32rr
+      {
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO)
+	      .addReg(X86::R11D);
+
+	  BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+	      .add(BaseRegMO)
+	      .add(ScaleMO)
+	      .add(IndexMO)
+	      .add(OffsetMO)
+	      .add(SegmentMO)
+	      .addReg(X86::R12D);
+      }
+      
+      break;
+  }
+  case X86::ADD32mi8: {
+      MachineOperand& BaseRegMO = MI.getOperand(0);
+      MachineOperand& ScaleMO = MI.getOperand(1);
+      MachineOperand& IndexMO = MI.getOperand(2);
+      MachineOperand& OffsetMO = MI.getOperand(3);
+      MachineOperand& SegmentMO = MI.getOperand(4);
+      MachineOperand& SrcMO = MI.getOperand(5);
+
+      Remove.push_back(&MI);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm)) 
+	  .addReg(X86::R12D)
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO);
+
+      // Perform comp simp transform, sets CF
+      
+      int8_t Imm = static_cast<int8_t>(SrcMO.getImm());
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R11)
+	    .addReg(X86::R12);
+
+      MCRegister Dest32 = X86::R11D;
+      MCRegister Dest64 = X86::R11;
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Dest32)
+        .addReg(Dest32);       
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R10)
+        .addImm(1ULL << 33ULL);
+        
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), Dest64)
+        .addReg(Dest64)
+        .addReg(X86::R10);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri32), X86::R10)
+        .addImm(0);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::ADD32ri8), X86::R10)
+        .addReg(X86::R10)
+        .addImm(Imm);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::ADD64rr), Dest64)
+        .addReg(Dest64)
+        .addReg(X86::R10);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::CMP32ri8), Dest32)
+        .addImm(0);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::BT64ri8), Dest64)
+        .addImm(32);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Dest32)
+        .addReg(Dest32);
+
+      // Perform blinding store
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+	  .addReg(X86::R11B);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R12)
+	  .addReg(X86::R12);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO)
+	  .addReg(X86::R12D);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+	  .add(BaseRegMO)
+	  .add(ScaleMO)
+	  .add(IndexMO)
+	  .add(OffsetMO)
+	  .add(SegmentMO)
+	  .addReg(X86::R11D);
+      
+      break;
+  }
+  case X86::ADD64mi32: {
+    MachineOperand& BaseRegMO = MI.getOperand(0);
+    MachineOperand& ScaleMO = MI.getOperand(1);
+    MachineOperand& IndexMO = MI.getOperand(2);
+    MachineOperand& OffsetMO = MI.getOperand(3);
+    MachineOperand& SegmentMO = MI.getOperand(4);
+    MachineOperand& SrcMO = MI.getOperand(5);
+
+    Remove.push_back(&MI);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
+      .addReg(X86::R11)
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO);
+
+    // Perform comp simp transform, sets CF
+
+    int64_t Imm = SrcMO.getImm();
+
+    auto Dest64 = X86::R11;
+    auto Dest16 = X86::R11;
+
+    auto Src64 = X86::R10;
+    auto Src16 = X86::R10W;
+    auto Src8 = X86::R10B;
+
+    auto Scratch1_64 = X86::R12;
+    auto Scratch1_32 = X86::R12D;
+    auto Scratch1_16 = X86::R12W;
+
+    auto Scratch2_64 = X86::R13;
+    auto Scratch2_32 = X86::R13D;
+    auto Scratch2_16 = X86::R13W;
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), Src64).addImm(0);
+    BuildMI(MBB, MI, DL, TII->get(X86::ADD64ri32), Src64)
+        .addReg(Src64)
+        .addImm(Imm);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), Scratch1_64).addImm(1ULL << 48ULL);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Scratch1_16).addReg(Dest16);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Dest16).addImm(1);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), Scratch2_64).addImm(1ULL << 48ULL);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Scratch2_16).addReg(Src16);
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16ri), Src16).addImm(1);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Scratch1_64)
+        .addReg(Scratch1_64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Scratch2_64)
+        .addReg(Scratch2_64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Dest64)
+        .addReg(Dest64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Src64)
+        .addReg(Src64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ADD32rr), X86::R11D)
+        .addReg(Scratch1_32)
+        .addReg(Scratch2_32);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ADC64rr), Dest64)
+        .addReg(Dest64)
+        .addReg(Src64);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Scratch2_64)
+        .addReg(Scratch2_64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROL64ri), Src64)
+        .addReg(Src64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::ROR64ri), Scratch1_64)
+        .addReg(Scratch1_64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::RCL64ri), Dest64)
+        .addReg(Dest64)
+        .addImm(16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV16rr), Dest16).addReg(Scratch1_16);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::SETCCr), Src8).addImm(2);
+    BuildMI(MBB, MI, DL, TII->get(X86::CMP64ri8), Dest64).addImm(0x0);
+    BuildMI(MBB, MI, DL, TII->get(X86::BT64ri8), Src8).addImm(0x0);
+
+    // Reload memory contents into R12
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm))
+      .addReg(X86::R12)
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO);
+
+    // Perform blinding store
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+      .addReg(X86::R11B);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R12)
+      .addReg(X86::R12);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO)
+      .addReg(X86::R12);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO)
+      .addReg(X86::R11);
+    
+    break;
+  }
+  case X86::SUB32mr: {
+    MachineOperand& BaseRegMO = MI.getOperand(0);
+    MachineOperand& ScaleMO = MI.getOperand(1);
+    MachineOperand& IndexMO = MI.getOperand(2);
+    MachineOperand& OffsetMO = MI.getOperand(3);
+    MachineOperand& SegmentMO = MI.getOperand(4);
+    MachineOperand& SrcMO = MI.getOperand(5);
+
+    Remove.push_back(&MI);
+
+    auto Src32 = SrcMO.getReg();
+    auto Src64 = TRI->getMatchingSuperReg(Src32, X86::sub_32bit,
+                                            &X86::GR64RegClass);
+    
+    auto Dest32 = X86::R11D;
+    auto Dest64 = X86::R11;
+    auto Dest8 = X86::R11B;
+
+    auto Scratch64 = X86::R10;
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm))
+      .addReg(Dest32)
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO);
+
+    // Perform comp simp transform
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), Scratch64).addReg(Src64);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV32rr), Src32).addReg(Src32);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), Src64)
+        .addReg(Src64)
+        .addImm(1ULL << 31ULL);
+    BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri32), Src64)
+        .addReg(Src64)
+        .addImm(1ULL << 31ULL);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::SUB64rr), Dest64)
+        .addReg(Dest64)
+        .addReg(Src64);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), Src64).addReg(Scratch64);
+
+    // Reload memory contents into R12
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV32rm))
+      .addReg(X86::R12D)
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO);
+
+    // Perform blinding store
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R12B)
+      .addReg(Dest8);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::NOT32r), X86::R12D)
+      .addReg(X86::R12D);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO)
+      .addReg(X86::R12D);
+
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV32mr))
+      .add(BaseRegMO)
+      .add(ScaleMO)
+      .add(IndexMO)
+      .add(OffsetMO)
+      .add(SegmentMO)
+      .addReg(Dest32);
+
+      break;
   }
   case X86::MOV32mr:
   case X86::MOV32mi: {
@@ -687,376 +1762,521 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     // of the sensitive data, so it's already there.
     break;
   }
+  case X86::PUSH64rmm: {
+      MachineOperand& Base = MI.getOperand(0);
+      MachineOperand& Scale = MI.getOperand(1);
+      MachineOperand& Idx = MI.getOperand(2);
+      MachineOperand& Disp = MI.getOperand(3);
+      MachineOperand& Segment = MI.getOperand(4);
+
+      Remove.push_back(&MI);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R11)
+	  .add(Base)
+	  .add(Scale)
+	  .add(Idx)
+	  .add(Disp)
+	  .add(Segment);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	  .addReg(X86::R11B);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr), X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr), X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R11);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::RSP)
+	  .addReg(X86::RSP)
+	  .addImm(8);
+      
+      break;
+  }
+  case X86::PUSH64i32:
+  case X86::PUSH64i8: {
+      uint64_t Imm = MI.getOperand(0).getImm();
+      uint8_t Imm8 = Imm;
+
+      Remove.push_back(&MI);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0);
+
+      /* if imm sz < 64 bits, then it needs to be sign extended to 64 bits
+         then stored for PUSH64i8 and PUSH64i32 */
+      assert(MI.getOpcode() == X86::PUSH64i8 ||
+	     MI.getOpcode() == X86::PUSH64i32);
+      auto IntoROpcode = MI.getOpcode() == X86::PUSH64i8 ? X86::MOV8ri : X86::MOV32ri;
+      auto SignExtendOpcode = MI.getOpcode() == X86::PUSH64i8 ? X86::MOVSX64rr8 : X86::MOVSX64rr32;
+      auto SignExtendReg = MI.getOpcode() == X86::PUSH64i8 ? X86::R11B : X86::R11D;
+      BuildMI(MBB, MI, DL, TII->get(IntoROpcode), X86::R11)
+	  .addImm(Imm);
+      BuildMI(MBB, MI, DL, TII->get(SignExtendOpcode), X86::R11)
+	  .addReg(SignExtendReg);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	  .addReg(X86::R11B);
+
+      // BuildMI(MBB, MI, DL, TII->get(X86::MOV8ri), X86::R10B)
+      // 	  .addImm(Imm8);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R10);
+      
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R11);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::RSP)
+	  .addReg(X86::RSP)
+	  .addImm(8);
+
+      break;
+  }
+  case X86::PUSH64r: {
+      Remove.push_back(&MI);
+      
+      MCRegister Src64 = MI.getOperand(0).getReg().asMCReg();
+      MCRegister Src8 = TRI->getSubReg(Src64, X86::sub_8bit);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64rm), X86::R10)
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R10B)
+	  .addReg(Src8);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::NOT64r), X86::R10)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(X86::R10);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::MOV64mr))
+	  .addReg(X86::RSP)
+	  .addImm(1)
+	  .addReg(0)
+	  .addImm(-8)
+	  .addReg(0)
+	  .addReg(Src64);
+
+      BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::RSP)
+	  .addReg(X86::RSP)
+	  .addImm(8);
+      
+      break;
+  }
+  case X86::MOVDQAmr:
+  case X86::MOVDQUmr:
+  case X86::MOVUPSmr:
   case X86::MOVAPSmr: {
     auto &BaseRegMO = MI.getOperand(0);
     auto &ScaleMO = MI.getOperand(1);
     auto &IndexMO = MI.getOperand(2);
     auto &OffsetMO = MI.getOperand(3);
     auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+    auto &SrcRegMO = MI.getOperand(5);
 
-    auto Load = BuildMI(MBB, MI, DL, TII->get(X86::MOVAPSrm), X86::XMM15)
-                    .addReg(BaseRegMO.getReg())
-                    .add(ScaleMO) // Scale
-                    .add(IndexMO) // Index
-                    .add(OffsetMO)
-                    .add(SegmentMO);
+    Remove.push_back(&MI);
 
-    auto FFFF = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                    .addImm(0xFFFFFFFFFFFFFF);
-    auto FirstFFFF =
-        BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-            .addReg(X86::R11);
-    auto ZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                    .addImm(0x00000000000000);
-    auto SecondZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-                          .addReg(X86::XMM14)
-                          .addReg(X86::R11)
-                          .addImm(1);
+    if (MI.getOpcode() == X86::MOVDQAmr) {
+	/* then preserve ZF (really all flags here) */
+	// Save rax
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	    .addReg(X86::RAX);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+	// store LAHF in rax to r13 for later restoration
+	BuildMI(MBB, MI, DL, TII->get(X86::LAHF));
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R13)
+	    .addReg(X86::RAX);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+	// restore rax from r12
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	    .addReg(X86::R12);
+    }
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+    BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	.add(BaseRegMO);
 
-    auto Store = BuildMI(MBB, MI, DL, TII->get(X86::MOVAPSmr))
-                     .add(BaseRegMO)
-                     .add(ScaleMO)
-                     .add(IndexMO)
-                     .add(OffsetMO)
-                     .add(SegmentMO)
-                     .addReg(X86::XMM15);
+    for (int WordIdx = 0; WordIdx <= 7; ++WordIdx) {
+	BuildMI(MBB, MI, DL, TII->get(X86::PEXTRWrr), X86::R10D)
+	    .add(SrcRegMO)
+	    .addImm(WordIdx);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVAPSrr), X86::XMM15).add(DestRegMO);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16rm), X86::R11W)
+	    .addReg(X86::R12)
+	    .add(ScaleMO)
+	    .add(IndexMO)
+	    .add(OffsetMO)
+	    .add(SegmentMO);
 
-    auto ZZZZ1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                     .addImm(0x00000000000000);
-    auto FirstZZZZ =
-        BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-            .addReg(X86::R11);
-    auto FFFF1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                     .addImm(0xFFFFFFFFFFFFFF);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV8rr), X86::R11B)
+	    .addReg(X86::R10B);
 
-    auto SecondFFFF = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-                          .addReg(X86::XMM14)
-                          .addReg(X86::R11)
-                          .addImm(1);
+	BuildMI(MBB, MI, DL, TII->get(X86::NOT16r), X86::R11W)
+	    .addReg(X86::R11W);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16mr))
+	    .addReg(X86::R12)
+	    .add(ScaleMO)
+	    .add(IndexMO)
+	    .add(OffsetMO)
+	    .add(SegmentMO)
+	    .addReg(X86::R11W);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV16mr))
+	    .addReg(X86::R12)
+	    .add(ScaleMO)
+	    .add(IndexMO)
+	    .add(OffsetMO)
+	    .add(SegmentMO)
+	    .addReg(X86::R10W);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+	if (WordIdx < 7) {
+	    BuildMI(MBB, MI, DL, TII->get(X86::SUB64ri8), X86::R12)
+		.addReg(X86::R12)
+		.addImm(-2);
+	}
+    }
 
-    auto OR1 = BuildMI(MBB, MI, DL, TII->get(X86::ORPSrm), X86::XMM15)
-                   .addReg(X86::XMM15)
-                   .add(BaseRegMO)
-                   .add(ScaleMO)
-                   .add(IndexMO)
-                   .add(OffsetMO)
-                   .add(SegmentMO);
+    if (MI.getOpcode() == X86::MOVDQAmr) {
+	/* then restore ZF (really all flags here) */
+	// Save rax
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::R12)
+	    .addReg(X86::RAX);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVAPSmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	    .addReg(X86::R13);
+	BuildMI(MBB, MI, DL, TII->get(X86::SAHF));
+
+	// restore rax from r12
+	BuildMI(MBB, MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+	    .addReg(X86::R12);
+    }
     break;
   }
-  case X86::MOVUPSmr: {
-    auto &BaseRegMO = MI.getOperand(0);
-    auto &ScaleMO = MI.getOperand(1);
-    auto &IndexMO = MI.getOperand(2);
-    auto &OffsetMO = MI.getOperand(3);
-    auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+  // case X86::MOVUPSmr: {
+  //   auto &BaseRegMO = MI.getOperand(0);
+  //   auto &ScaleMO = MI.getOperand(1);
+  //   auto &IndexMO = MI.getOperand(2);
+  //   auto &OffsetMO = MI.getOperand(3);
+  //   auto &SegmentMO = MI.getOperand(4);
+  //   auto &DestRegMO = MI.getOperand(5);
 
-    auto Load = BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrm), X86::XMM15)
-                    .addReg(BaseRegMO.getReg())
-                    .add(ScaleMO) // Scale
-                    .add(IndexMO) // Index
-                    .add(OffsetMO)
-                    .add(SegmentMO);
+  //   auto Load = BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrm), X86::XMM15)
+  //                   .addReg(BaseRegMO.getReg())
+  //                   .add(ScaleMO) // Scale
+  //                   .add(IndexMO) // Index
+  //                   .add(OffsetMO)
+  //                   .add(SegmentMO);
 
-    auto FFFF = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                    .addImm(0xFFFFFFFFFFFFFF);
-    auto FirstFFFF =
-        BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-            .addReg(X86::R11);
-    auto ZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                    .addImm(0x00000000000000);
-    auto SecondZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-                          .addReg(X86::XMM14)
-                          .addReg(X86::R11)
-                          .addImm(1);
+  //   auto FFFF = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //                   .addImm(0xFFFFFFFFFFFFFF);
+  //   auto FirstFFFF =
+  //       BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //           .addReg(X86::R11);
+  //   auto ZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //                   .addImm(0x00000000000000);
+  //   auto SecondZZZZ = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //                         .addReg(X86::XMM14)
+  //                         .addReg(X86::R11)
+  //                         .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    auto Store = BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSmr))
-                     .add(BaseRegMO)
-                     .add(ScaleMO)
-                     .add(IndexMO)
-                     .add(OffsetMO)
-                     .add(SegmentMO)
-                     .addReg(X86::XMM15);
+  //   auto Store = BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSmr))
+  //                    .add(BaseRegMO)
+  //                    .add(ScaleMO)
+  //                    .add(IndexMO)
+  //                    .add(OffsetMO)
+  //                    .add(SegmentMO)
+  //                    .addReg(X86::XMM15);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrr), X86::XMM15).add(DestRegMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrr), X86::XMM15).add(DestRegMO);
 
-    auto ZZZZ1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                     .addImm(0x00000000000000);
-    auto FirstZZZZ =
-        BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-            .addReg(X86::R11);
-    auto FFFF1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-                     .addImm(0xFFFFFFFFFFFFFF);
+  //   auto ZZZZ1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //                    .addImm(0x00000000000000);
+  //   auto FirstZZZZ =
+  //       BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //           .addReg(X86::R11);
+  //   auto FFFF1 = BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //                    .addImm(0xFFFFFFFFFFFFFF);
 
-    auto SecondFFFF = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-                          .addReg(X86::XMM14)
-                          .addReg(X86::R11)
-                          .addImm(1);
+  //   auto SecondFFFF = BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //                         .addReg(X86::XMM14)
+  //                         .addReg(X86::R11)
+  //                         .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrm), X86::XMM14)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSrm), X86::XMM14)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    // TODO: Find why ORPSrm gave seg fault
-    BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   // TODO: Find why ORPSrm gave seg fault
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
-    break;
-  }
-  case X86::MOVDQAmr: {
-    auto &BaseRegMO = MI.getOperand(0);
-    auto &ScaleMO = MI.getOperand(1);
-    auto &IndexMO = MI.getOperand(2);
-    auto &OffsetMO = MI.getOperand(3);
-    auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVUPSmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
+  //   break;
+  // }
+  // case X86::MOVDQAmr: {
+  //   auto &BaseRegMO = MI.getOperand(0);
+  //   auto &ScaleMO = MI.getOperand(1);
+  //   auto &IndexMO = MI.getOperand(2);
+  //   auto &OffsetMO = MI.getOperand(3);
+  //   auto &SegmentMO = MI.getOperand(4);
+  //   auto &DestRegMO = MI.getOperand(5);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArm), X86::XMM15)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArm), X86::XMM15)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0xFFFFFFFFFFFFFF);
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-        .addReg(X86::R11);
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0x00000000000000);
-    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-        .addReg(X86::XMM14)
-        .addReg(X86::R11)
-        .addImm(1);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0xFFFFFFFFFFFFFF);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //       .addReg(X86::R11);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0x00000000000000);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::R11)
+  //       .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQAmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQAmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).add(DestRegMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArr), X86::XMM15).add(DestRegMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0x00000000000000);
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-        .addReg(X86::R11);
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0xFFFFFFFFFFFFFF);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0x00000000000000);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //       .addReg(X86::R11);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0xFFFFFFFFFFFFFF);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-        .addReg(X86::XMM14)
-        .addReg(X86::R11)
-        .addImm(1);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::R11)
+  //       .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArm), X86::XMM14)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQArm), X86::XMM14)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQAmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
-    break;
-  }
-  case X86::MOVDQUmr: {
-    auto &BaseRegMO = MI.getOperand(0);
-    auto &ScaleMO = MI.getOperand(1);
-    auto &IndexMO = MI.getOperand(2);
-    auto &OffsetMO = MI.getOperand(3);
-    auto &SegmentMO = MI.getOperand(4);
-    auto &DestRegMO = MI.getOperand(5);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQAmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
+  //   break;
+  // }
+  // case X86::MOVDQUmr: {
+  //   auto &BaseRegMO = MI.getOperand(0);
+  //   auto &ScaleMO = MI.getOperand(1);
+  //   auto &IndexMO = MI.getOperand(2);
+  //   auto &OffsetMO = MI.getOperand(3);
+  //   auto &SegmentMO = MI.getOperand(4);
+  //   auto &DestRegMO = MI.getOperand(5);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM15)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM15)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0xFFFFFFFFFFFFFF);
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-        .addReg(X86::R11);
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0x00000000000000);
-    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-        .addReg(X86::XMM14)
-        .addReg(X86::R11)
-        .addImm(1);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0xFFFFFFFFFFFFFF);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //       .addReg(X86::R11);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0x00000000000000);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::R11)
+  //       .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrr), X86::XMM15).add(DestRegMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrr), X86::XMM15).add(DestRegMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0x00000000000000);
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
-        .addReg(X86::R11);
-    BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
-        .addImm(0xFFFFFFFFFFFFFF);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0x00000000000000);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_MOVQ64rr), X86::XMM14)
+  //       .addReg(X86::R11);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOV64ri), X86::R11)
+  //       .addImm(0xFFFFFFFFFFFFFF);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
-        .addReg(X86::XMM14)
-        .addReg(X86::R11)
-        .addImm(1);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::PINSRQrr), X86::XMM14)
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::R11)
+  //       .addImm(1);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDPSrr), Register(X86::XMM15))
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
-        .addReg(X86::XMM14)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MMX_PCMPEQWrr), Register(X86::XMM14))
+  //       .addReg(X86::XMM14)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
-        .addReg(Register(X86::XMM15))
-        .addReg(Register(X86::XMM14));
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ANDNPSrr), Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM15))
+  //       .addReg(Register(X86::XMM14));
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM14)
-        .addReg(BaseRegMO.getReg())
-        .add(ScaleMO) // Scale
-        .add(IndexMO) // Index
-        .add(OffsetMO)
-        .add(SegmentMO);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUrm), X86::XMM14)
+  //       .addReg(BaseRegMO.getReg())
+  //       .add(ScaleMO) // Scale
+  //       .add(IndexMO) // Index
+  //       .add(OffsetMO)
+  //       .add(SegmentMO);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
-        .addReg(X86::XMM15)
-        .addReg(X86::XMM14);
+  //   BuildMI(MBB, MI, DL, TII->get(X86::ORPSrr), X86::XMM15)
+  //       .addReg(X86::XMM15)
+  //       .addReg(X86::XMM14);
 
-    BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
-        .add(BaseRegMO)
-        .add(ScaleMO)
-        .add(IndexMO)
-        .add(OffsetMO)
-        .add(SegmentMO)
-        .addReg(X86::XMM15);
-    break;
-  }
+  //   BuildMI(MBB, MI, DL, TII->get(X86::MOVDQUmr))
+  //       .add(BaseRegMO)
+  //       .add(ScaleMO)
+  //       .add(IndexMO)
+  //       .add(OffsetMO)
+  //       .add(SegmentMO)
+  //       .addReg(X86::XMM15);
+  //   break;
+  // }
   case X86::VMOVAPSYmr: {
     auto &BaseRegMO = MI.getOperand(0);
     auto &ScaleMO = MI.getOperand(1);
@@ -1795,7 +3015,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
         .addReg(X86::XMM15);
     break;
   }
-  case X86::INLINEASM:{
+  case X86::INLINEASM: {
     std::string Asm(MI.getOperand(0).getSymbolName());
     std::vector<std::vector<std::string>> Insts;
     std::vector<std::string> Inst;
@@ -1845,7 +3065,7 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
     break;
   }
   default: {
-    errs() << "Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
+    errs() << "[SS] Unsupported opcode: " << TII->getName(MI.getOpcode()) << '\n';
     OpcodeSupported = false;
     // assert(false && "Unsupported opcode in X86SilentStoreHardening");
     break;
@@ -1857,9 +3077,652 @@ void X86_64SilentStoreMitigationPass::doX86SilentStoreHardening(
   }
 }
 
+static unsigned int changedOpcode = 0;
+
+static void setupTest(MachineFunction &MF) {
+    llvm::errs() << "setupTest \t" << MF.getName() << "\n";
+    for (auto &MBB : MF) {
+	for (auto &MI : MBB) {
+	    llvm::errs() << "MI setupTest \t" << MI << "\n";
+      
+	    if (MI.getOpcode() == X86::RET64) {
+		MachineBasicBlock *MBB = MI.getParent();
+		MachineFunction *MF = MBB->getParent();
+		DebugLoc DL = MI.getDebugLoc();
+		const auto &STI = MF->getSubtarget();
+		auto *TII = STI.getInstrInfo();
+		auto *TRI = STI.getRegisterInfo();
+		auto &MRI = MF->getRegInfo();
+
+		auto Op = MF->getName().split('_').second.rsplit('_').first;
+		llvm::errs() << "Op setupTest \t" << Op << "\n";
+
+		MachineInstr* AddedMI = nullptr;
+		constexpr int CycleCountMeasureAmortizationCount = 2000;
+		int AmortizeCount = 0;
+
+		/* insert saves of r10-15 */
+		if (!VerifiableTests)
+		{
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::R10);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::R11);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::R12);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::R13);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::R14);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::R15);
+		}
+
+		// record cycle counts
+		if (RecordTestCycleCounts && !VerifiableTests) {
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RAX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RBX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RCX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RDX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::CPUID));
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::RDTSC));
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RDX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RCX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RBX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+		      .addReg(X86::RDI)
+		      .addImm(1)
+		      .addReg(0)
+		      .addImm(0x110ull)
+		      .addReg(0)
+		      .addReg(X86::RAX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RAX);
+		}
+
+		/* Insert the test insn, the original insn */
+		/* if recording cycle counts, insert the insn
+                   CycleCountMeasureAmortizationCount times. otherwise,
+                   probably testing correctness so just insert once. this
+                   is why the do ... while ... loop */
+		do {
+		    if (Op == "ADD64mr") {
+			changedOpcode = X86::ADD64mr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mr), X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::RDX);
+		    } else if (Op == "MOVAPSmr") {
+			changedOpcode = X86::MOVAPSmr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVAPSmr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
+		    } else if (Op == "MOVDQAmr") {
+			changedOpcode = X86::MOVDQAmr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQAmr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
+		    } else if (Op == "MOVUPSmr") {
+			changedOpcode = X86::MOVUPSmr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVUPSmr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
+		    } else if (Op == "MOVDQUmr") {
+			changedOpcode = X86::MOVDQUmr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVDQUmr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
+		    } else if (Op == "PUSH64i8") {
+			changedOpcode = X86::PUSH64i8;
+			
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64i8))
+			    .addImm(128);
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			    .addReg(X86::RAX);
+		    }
+
+		    else if (Op == "PUSH64i32") {
+			changedOpcode = X86::PUSH64i32;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64i32))
+			    .addImm((1ull << 31ull) | (1ull << 7ull));
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			    .addReg(X86::RAX);
+		    }
+
+		    else if (Op == "PUSH64rmm") {
+			changedOpcode = X86::PUSH64rmm;
+			
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64rmm))
+			    .addReg(X86::RDX)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0);
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			    .addReg(X86::RAX);
+		    }
+
+		    else if (Op == "PUSH64r") {
+			changedOpcode = X86::PUSH64r;
+			
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			    .addReg(X86::RSI);
+			BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			    .addReg(X86::RAX);
+		    }
+
+		    else if (Op == "AND32mr") {
+			changedOpcode = X86::AND32mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND32mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::EDX);
+		    }
+
+		    else if (Op == "AND8mi") {
+			changedOpcode = X86::AND8mi;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::AND8mi))
+			    .addReg(X86::RSI)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(0xCCULL);
+		    }
+		    else if (Op == "XOR8mr") {
+			changedOpcode = X86::XOR8mr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR8mr), X86::SIL)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DL);
+		    }
+		    else if (Op == "XOR64mr") {
+			changedOpcode = X86::XOR64mr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::XOR64mr), X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::RDX);
+		    }
+
+		    else if (Op == "ADD64mi32") {
+			changedOpcode = X86::ADD64mi32;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi32), X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(1ULL << 7ULL);
+		    }
+
+		    else if (Op == "ADD64mi8") {
+			changedOpcode = X86::ADD64mi8;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD64mi8), X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(0xFFull);
+		    }
+
+		    else if (Op == "ADD32mi8") {
+			changedOpcode = X86::ADD32mi8;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mi8), X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(32);
+		    }
+		    else if (Op == "ADD32mr") {
+			changedOpcode = X86::ADD32mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD32mr))
+			    .addReg(X86::RSI)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::EDX);
+		    }
+		    else if (Op == "ADD8mr") {
+			changedOpcode = X86::ADD8mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::ADD8mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DL);
+		    }
+		    else if (Op == "SUB32mr") {
+			changedOpcode = X86::SUB32mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::EDX);
+		    }
+		    else if (Op == "MOV8mr_NOREX") {
+			changedOpcode = X86::MOV8mr_NOREX;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr_NOREX))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DL);
+		    } else if (Op == "MOV8mr_HIGHBYTE") {
+			changedOpcode = X86::MOV8mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::AH); // one of AH,BH,CH,DH
+		    } else if (Op == "MOV8mr") {
+			changedOpcode = X86::MOV8mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DL);
+		    }
+		    else if (Op == "MOV8mi") {
+			changedOpcode = X86::MOV8mi;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mi))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(137);
+		    }
+		    else if (Op == "MOV16mr") {
+			changedOpcode = X86::MOV16mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV16mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::DX);
+		    }
+
+		    else if (Op == "MOV16mi") {
+			changedOpcode = X86::MOV16mi;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV16mi))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(1ull << 13ull);
+		    }
+
+		    else if (Op == "MOV32mr") {
+			changedOpcode = X86::MOV32mr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::EDX);
+		    } else if (Op == "MOV64mi32") {
+			changedOpcode = X86::MOV64mi32;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mi32))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(1ull << 25ull);
+		    } else if (Op == "MOV64mr") {
+			changedOpcode = X86::MOV64mr;
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::RDX);
+			
+
+		    } else if (Op == "MOV32mi") {
+			changedOpcode = X86::MOV32mi;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOV32mi))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addImm(1ull << 25ull);
+		    }
+
+		    else if (Op == "MOVPDI2DImr") {
+			changedOpcode = X86::MOVPDI2DImr;
+
+			AddedMI = BuildMI(*MBB, &MI, DL, TII->get(X86::MOVPDI2DImr))
+			    .addReg(X86::RSI)
+			    .addImm(1)
+			    .addReg(0)
+			    .addImm(0)
+			    .addReg(0)
+			    .addReg(X86::XMM0);
+		    }
+
+		    if (nullptr != AddedMI) {
+		       AddedMI->NeedsTransforming = true;
+		    }
+	    
+		    AmortizeCount += 1;
+		}
+		while (RecordTestCycleCounts &&
+		       AmortizeCount < CycleCountMeasureAmortizationCount);
+
+		if (RecordTestCycleCounts && !VerifiableTests) {
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RAX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RBX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RCX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r))
+			.addReg(X86::RDX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::RDTSCP));
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr))
+			.addReg(X86::R11)
+			.addReg(X86::RAX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::CPUID));
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rm))
+			.addReg(X86::R10)
+			.addReg(X86::RDI)
+			.addImm(1)
+			.addReg(0)
+			.addImm(0x110ull)
+			.addReg(0);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::SUB32rr), X86::R11D)
+			.addReg(X86::R11D)
+			.addReg(X86::R10D);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+		      .addReg(X86::RDI)
+		      .addImm(1)
+		      .addReg(0)
+		      .addImm(0x110ull)
+		      .addReg(0)
+		      .addReg(X86::R11);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RDX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RCX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RBX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::RAX);
+		}
+
+		/* insert restores of r12-15. pushed r12, r13, r14, 15 */
+		if (!VerifiableTests)
+		{
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			.addReg(X86::R15);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			.addReg(X86::R14);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			.addReg(X86::R13);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			.addReg(X86::R12);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			.addReg(X86::R11);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r))
+			.addReg(X86::R10); 
+		}
+
+		/* write state into first argument per 
+		   implementation-tester.c OutState struct in pandora-eval repo */
+		if (!VerifiableTests)
+		{
+		    /*
+		      Intel: [base + index*scale + offset] 
+		      ATT: offset(base, index, scale)    
+		    */
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(0) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x00) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::RAX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x8) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::RBX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x10) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::RCX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x18) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::RDX);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x20) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::RSP);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x28) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::RBP);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x30) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::RSI);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x38) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::RDI);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x40) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::R8);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x48) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::R9);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x50) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::R10);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x58) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::R11);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x60) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::R12);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x68) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::R13);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x70) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::R14);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64mr))
+			.addReg(X86::RDI) // base reg
+			.addImm(1) // scale (RDI * 1)
+			.addReg(0) // index reg (none)
+			.addImm(0x78) // offset
+			.addReg(0) // segment reg (none)
+			.addReg(X86::R15);
+
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r), X86::R10);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r), X86::R11);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r), X86::R12);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::PUSH64r), X86::R15);   
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::R15)
+			.addReg(X86::RAX);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::LAHF));
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::ROR64ri), X86::RAX)
+			.addReg(X86::RAX)
+			.addImm(8ull);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV8mr))
+			.addReg(X86::RDI)
+			.addImm(0)
+			.addReg(0)
+			.addImm(0x80ULL)
+			.addReg(0)
+			.addReg(X86::AL);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::MOV64rr), X86::RAX)
+			.addReg(X86::R15);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R15);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R12);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R11);
+		    BuildMI(*MBB, &MI, DL, TII->get(X86::POP64r), X86::R10);
+		}
+	    }
+	}
+    }
+}
+
 bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) {
+
+    std::vector<MachineInstr*> Remove{};
+    
   if (!EnableSilentStore)
     return false;
+
+  if (MF.getName().startswith("x86silentstorestest")) {
+    setupTest(MF);
+    
+    if (MF.getName().contains("_transformed")) {
+      std::vector<MachineInstr*> MIs;
+      for (auto &MBB : MF) {
+        for (auto &MI : MBB) {
+	    if (MI.NeedsTransforming) {
+		doX86SilentStoreHardening(MI, MBB, MF, Remove);
+	    }
+        }
+      }
+    }
+
+    for (auto& MI : Remove) {
+	MI->eraseFromParent();
+    }
+    Remove.clear();
+  
+    return true;
+  }
 
   /* static class member: don't reparse the CSV file on each MachineFunction
      in the compilation unit */
@@ -1874,10 +3737,10 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
     return doesModifyFunction;
   }
 
-  llvm::errs() << "[SilentStore]\n";
+  // llvm::errs() << "[SilentStore]\n";
 
   std::string SubName = MF.getName().str();
-  errs() << "Hardening func: " << SubName << '\n';
+  // errs() << "Hardening func: " << SubName << '\n';
 
   bool SameSymbolNameAlreadyInstrumented =
       FunctionsInstrumented.end() != FunctionsInstrumented.find(SubName);
@@ -1891,27 +3754,22 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
   }
   FunctionsInstrumented.insert(SubName);
 
+  const auto &STI = MF.getSubtarget();
+  auto *TII = STI.getInstrInfo();
+
   for (auto &MBB : MF) {
-    llvm::errs() << "Checking basic block " << MBB << "\n";
+    // llvm::errs() << "Checking basic block " << MBB << "\n";
     for (llvm::MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
          I != E; ++I) {
       llvm::MachineInstr &MI = *I;
       DebugLoc DL = MI.getDebugLoc();
-      const auto &STI = MF.getSubtarget();
-      auto *TII = STI.getInstrInfo();
       
-      llvm::errs() << "Checking instruction " << MI << "\n";
-
       if (MI.getOpcode() == X86::SBB64ri32) {
         int CurIdx = MI.getOperand(2).getImm();
-
-        llvm::errs() << "Found SBB64ri32 instruction at index " << CurIdx << "\n";
 
         if (this->shouldRunOnInstructionIdx(SubName, CurIdx)) {
           I++;
           llvm::MachineInstr &NextMI = *I;
-
-          llvm::errs() << "Found instruction " << NextMI << "\n";
 
           std::string CurOpcodeName = TII->getName(NextMI.getOpcode()).str();
           // don't count 'meta' insns like debug info, CFI indicators
@@ -1919,9 +3777,9 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
           // we are only on LLVM14, so this is the only descriptor available.
           const MCInstrDesc &MIDesc = NextMI.getDesc();
 
-          errs() << "hardening insn at idx " << CurIdx
-                 << " the MIR insn is: " << CurOpcodeName
-                 << " the full MI is: " << NextMI << '\n';
+          // errs() << "hardening insn at idx " << CurIdx
+          //        << " the MIR insn is: " << CurOpcodeName
+          //        << " the full MI is: " << NextMI << '\n';
 
           auto CurNameAndInsnIdx = std::pair<std::string, int>(SubName, CurIdx);
           auto Iter = ExpectedOpcodeNames.find(CurNameAndInsnIdx);
@@ -1943,17 +3801,22 @@ bool X86_64SilentStoreMitigationPass::runOnMachineFunction(MachineFunction& MF) 
             errs() << "Mismatch in instruction indices in function " << SubName
                    << '\n';
 
-            assert(false && "Mismatch in instruction indices");
+            
             errs() << "CSV Row was:\n";
             ErrIter->Print();
-            // exit(-1);
+	    assert(false && "Mismatch in instruction indices");
           }
-          this->doX86SilentStoreHardening(NextMI, MBB, MF);
+          doX86SilentStoreHardening(NextMI, MBB, MF, Remove);
           doesModifyFunction = true;
         }
       }
     }
   }
+
+  for (auto& MI : Remove) {
+      MI->eraseFromParent();
+  }
+  
   return doesModifyFunction;
 }
 
