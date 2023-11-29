@@ -55,6 +55,30 @@ static cl::opt<bool>
 		    cl::desc("[CS] Only output the transformed insn seq, no test abi fn prologue/epilogue."),
 		    cl::init(false));
 
+static cl::opt<bool> CompSimpVAdd("x86-cs-enable-vadd",
+                                         cl::desc("[CS] Transform vector add instructions"),
+                                         cl::init(false));
+
+static cl::opt<bool> CompSimpMul64("x86-cs-enable-multiply-64",
+                                          cl::desc("[CS] Transform 64-bit multiply instructions"),
+                                          cl::init(false));
+
+static cl::opt<bool> CompSimpShift("x86-cs-enable-shift",
+                                         cl::desc("[CS] Transform shift instructions"),
+                                         cl::init(false));
+
+static cl::opt<bool> CompSimpLEA("x86-cs-enable-lea",
+                                        cl::desc("[CS] Transform LEA instructions"),
+                                        cl::init(false));
+
+static cl::opt<bool> CompSimp64("x86-cs-enable-64",
+                                       cl::desc("[CS] Transform miscellaneous 64-bit instructions"),
+                                       cl::init(false));
+
+static cl::opt<bool> CompSimp32("x86-cs-enable-32",
+                                       cl::desc("[CS] Transform miscellaneous 32-bit or less instructions"),
+                                       cl::init(false));
+
 /* the opcode here is no significance, just to
    deduce placeholder type since i'm too lazy to
    find what the enum name is */
@@ -107,6 +131,7 @@ private:
   inline static std::set<std::string> FunctionsInstrumented;
        inline static unsigned long CsvLinesRead;
 
+  bool isInstructionTransformEnabled(MachineInstr *MI,  MachineFunction& MF);
   void doX86CompSimpHardening(MachineInstr *MI, MachineFunction& MF);
   Register get64BitReg(MachineOperand *MO, const TargetRegisterInfo *TRI);
   void insertSafeOr8i8Before(MachineInstr* MI);
@@ -10606,9 +10631,137 @@ X86_64CompSimpMitigationPass::insertSafeAdd8rmBefore(MachineInstr* MI)
 
 }
 
+bool X86_64CompSimpMitigationPass::isInstructionTransformEnabled(MachineInstr *MI, MachineFunction& MF) {
+  const auto &STI = MF.getSubtarget();
+  auto *TII = STI.getInstrInfo();
+
+  // Enable all transforms by default, for now
+  if (!CompSimpVAdd && 
+      !CompSimpMul64 &&
+      !CompSimpShift &&
+      !CompSimpLEA &&
+      !CompSimp64 &&
+      !CompSimp32)
+          return true;
+  
+  switch (MI->getOpcode()) {
+
+    case X86::MUL64r: 
+    case X86::MUL64m:
+    case X86::IMUL64rr:
+    case X86::IMUL64rm:
+    case X86::IMUL64rri8: 
+    case X86::IMUL64rri32:
+    case X86::IMUL64rmi32:
+        return CompSimpMul64;
+
+    case X86::SHL8rCL: 
+    case X86::SHL8ri: 
+    case X86::SHR8ri:
+    case X86::SAR8ri: 
+    case X86::SHR32rCL:
+    case X86::SHR32ri: 
+    case X86::SHR32r1:
+    case X86::SHL32rCL: 
+    case X86::SHL32ri:
+    case X86::SAR32ri: 
+    case X86::SAR64ri:
+    case X86::SHR64r1: 
+    case X86::SHR64ri:
+    case X86::SHL64ri:
+        return CompSimpShift;
+        
+    case X86::LEA64_32r: 
+    case X86::LEA64r:
+        return CompSimpLEA;
+
+    case X86::ADD64i32:
+    case X86::ADD64ri8:
+    case X86::ADD64ri32:
+    case X86::ADD64rm:
+    case X86::ADD64rr:
+    case X86::AND64rm:
+    case X86::AND64rr:
+    case X86::AND64i32:
+    case X86::AND64ri32:
+    case X86::AND64ri8:
+    case X86::OR64rr:
+    case X86::OR64rm:
+    case X86::OR64ri8:
+    case X86::OR64ri32:
+    case X86::XOR64rr:
+    case X86::XOR64rm: 
+    case X86::SUB64rr:
+    case X86::SUB64rm:
+    case X86::CMP64rr:
+    case X86::CMP64rm:
+    case X86::CMP64mr:
+        return CompSimp64;
+
+    case X86::ADD32rr:
+    case X86::ADD32rm:
+    case X86::ADD32ri8:
+    case X86::ADD32i32:
+    case X86::ADD32ri:
+    case X86::ADD8rm:
+    case X86::AND32rr:
+    case X86::AND32ri8:
+    case X86::AND32ri:
+    case X86::AND32i32:
+    case X86::OR32rr:
+    case X86::OR32ri8:
+    case X86::XOR32rr:
+    case X86::XOR32rm:
+    case X86::XOR32ri:
+    case X86::XOR32ri8:
+    case X86::XOR8rr:
+    case X86::XOR8rm:
+    case X86::SUB32rr:
+    case X86::SUB32rm:
+    case X86::TEST32rr:
+    case X86::AND8i8: 
+    case X86::AND8ri: 
+    case X86::AND8rr: 
+    case X86::TEST8ri:
+    case X86::TEST8i8:
+    case X86::TEST8mi:
+    case X86::AND16rr:
+    case X86::OR8rr:
+    case X86::OR8i8:
+    case X86::OR8ri:
+    case X86::OR16rr:
+    case X86::XOR16rr:
+    case X86::ADD8ri:
+    case X86::MUL32r:
+    case X86::CMP32rr: 
+    case X86::CMP32rm:
+    case X86::SUB8rr: 
+    case X86::IMUL32rr: 
+    case X86::IMUL32rm: 
+    case X86::IMUL32rri8: 
+        return CompSimp32;
+
+    default: {
+        errs() << "[CS] Could not determine whether opcode is enabled: " << TII->getName(MI->getOpcode()) << '\n';
+        return false;
+    }
+
+    case X86::PADDDrr:
+    case X86::PADDDrm:
+    case X86::PADDQrr:
+    case X86::PADDQrm:
+      return CompSimpVAdd;
+  }
+}
+
 void X86_64CompSimpMitigationPass::doX86CompSimpHardening(MachineInstr *MI, MachineFunction& MF) {
   const auto &STI = MF.getSubtarget();
   auto *TII = STI.getInstrInfo();
+
+  if (!isInstructionTransformEnabled(MI, MF)) {
+    errs() << "[CS] Skipping instruction due to user flags: " << TII->getName(MI->getOpcode()) << '\n';
+    return;
+  }
   
   switch (MI->getOpcode()) {
   case X86::LEA64_32r: 
