@@ -55,28 +55,28 @@ static cl::opt<bool>
 		    cl::desc("[CS] Only output the transformed insn seq, no test abi fn prologue/epilogue."),
 		    cl::init(false));
 
-static cl::opt<bool> CompSimpVAdd("x86-cs-enable-vadd",
-                                         cl::desc("[CS] Transform vector add instructions"),
+static cl::opt<bool> CompSimpVectorOps("x86-cs-enable-vector-ops",
+                                         cl::desc("[CS] Transform vector operations"),
                                          cl::init(false));
 
 static cl::opt<bool> CompSimpMul64("x86-cs-enable-multiply-64",
                                           cl::desc("[CS] Transform 64-bit multiply instructions"),
                                           cl::init(false));
 
-static cl::opt<bool> CompSimpShift("x86-cs-enable-shift",
-                                         cl::desc("[CS] Transform shift instructions"),
-                                         cl::init(false));
+static cl::opt<bool> CompSimpCMP("x86-cs-enable-cmp",
+                                        cl::desc("[CS] Transform CMP instructions"),
+                                        cl::init(false));
 
 static cl::opt<bool> CompSimpLEA("x86-cs-enable-lea",
                                         cl::desc("[CS] Transform LEA instructions"),
                                         cl::init(false));
 
-static cl::opt<bool> CompSimp64("x86-cs-enable-64",
-                                       cl::desc("[CS] Transform miscellaneous 64-bit instructions"),
+static cl::opt<bool> CompSimpOther64("x86-cs-enable-other-64",
+                                       cl::desc("[CS] Transform uncategorized 64-bit instructions"),
                                        cl::init(false));
 
-static cl::opt<bool> CompSimp32("x86-cs-enable-32",
-                                       cl::desc("[CS] Transform miscellaneous 32-bit or less instructions"),
+static cl::opt<bool> CompSimpOther("x86-cs-enable-other",
+                                       cl::desc("[CS] Transform all other uncategorized instructions"),
                                        cl::init(false));
 
 /* the opcode here is no significance, just to
@@ -10636,15 +10636,20 @@ bool X86_64CompSimpMitigationPass::isInstructionTransformEnabled(MachineInstr *M
   auto *TII = STI.getInstrInfo();
 
   // Enable all transforms by default, for now
-  if (!CompSimpVAdd && 
+  if (!CompSimpVectorOps && 
       !CompSimpMul64 &&
-      !CompSimpShift &&
+      !CompSimpCMP &&
       !CompSimpLEA &&
-      !CompSimp64 &&
-      !CompSimp32)
+      !CompSimpOther64 &&
+      !CompSimpOther)
           return true;
   
   switch (MI->getOpcode()) {
+    case X86::PADDDrr:
+    case X86::PADDDrm:
+    case X86::PADDQrr:
+    case X86::PADDQrm:
+      return CompSimpVectorOps;
 
     case X86::MUL64r: 
     case X86::MUL64m:
@@ -10654,22 +10659,6 @@ bool X86_64CompSimpMitigationPass::isInstructionTransformEnabled(MachineInstr *M
     case X86::IMUL64rri32:
     case X86::IMUL64rmi32:
         return CompSimpMul64;
-
-    case X86::SHL8rCL: 
-    case X86::SHL8ri: 
-    case X86::SHR8ri:
-    case X86::SAR8ri: 
-    case X86::SHR32rCL:
-    case X86::SHR32ri: 
-    case X86::SHR32r1:
-    case X86::SHL32rCL: 
-    case X86::SHL32ri:
-    case X86::SAR32ri: 
-    case X86::SAR64ri:
-    case X86::SHR64r1: 
-    case X86::SHR64ri:
-    case X86::SHL64ri:
-        return CompSimpShift;
         
     case X86::LEA64_32r: 
     case X86::LEA64r:
@@ -10693,10 +10682,14 @@ bool X86_64CompSimpMitigationPass::isInstructionTransformEnabled(MachineInstr *M
     case X86::XOR64rm: 
     case X86::SUB64rr:
     case X86::SUB64rm:
+    case X86::SAR64ri:
+    case X86::SHR64r1: 
+    case X86::SHR64ri:
+    case X86::SHL64ri:
     case X86::CMP64rr:
     case X86::CMP64rm:
     case X86::CMP64mr:
-        return CompSimp64;
+        return CompSimpOther64;
 
     case X86::ADD32rr:
     case X86::ADD32rm:
@@ -10716,6 +10709,7 @@ bool X86_64CompSimpMitigationPass::isInstructionTransformEnabled(MachineInstr *M
     case X86::XOR32ri8:
     case X86::XOR8rr:
     case X86::XOR8rm:
+    case X86::XOR8mr:
     case X86::SUB32rr:
     case X86::SUB32rm:
     case X86::TEST32rr:
@@ -10733,24 +10727,28 @@ bool X86_64CompSimpMitigationPass::isInstructionTransformEnabled(MachineInstr *M
     case X86::XOR16rr:
     case X86::ADD8ri:
     case X86::MUL32r:
-    case X86::CMP32rr: 
-    case X86::CMP32rm:
     case X86::SUB8rr: 
     case X86::IMUL32rr: 
     case X86::IMUL32rm: 
     case X86::IMUL32rri8: 
-        return CompSimp32;
+    case X86::SHL8rCL: 
+    case X86::SHL8ri: 
+    case X86::SHR8ri:
+    case X86::SAR8ri: 
+    case X86::SHR32rCL:
+    case X86::SHR32ri: 
+    case X86::SHR32r1:
+    case X86::SHL32rCL: 
+    case X86::SHL32ri:
+    case X86::SAR32ri: 
+    case X86::CMP32rr: 
+    case X86::CMP32rm:
+        return CompSimpOther;
 
     default: {
         errs() << "[CS] Could not determine whether opcode is enabled: " << TII->getName(MI->getOpcode()) << '\n';
         return false;
     }
-
-    case X86::PADDDrr:
-    case X86::PADDDrm:
-    case X86::PADDQrr:
-    case X86::PADDQrm:
-      return CompSimpVAdd;
   }
 }
 
